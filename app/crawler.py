@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 import aiosqlite
 
 from app.database import DB_PATH
-from app.parsers.musics_fa import parse_tracks
+from app.parsers.musics_fa import parse_track_detail, parse_tracks
 
 
 USER_AGENT = (
@@ -76,6 +76,118 @@ def extract_page_info(html, page_url):
         "description": description,
         "canonical_url": canonical_url
     }
+
+
+async def get_tracks_needing_review(source_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT external_id, source_url
+            FROM tracks
+            WHERE source_id = ?
+              AND validation_status != 'matched'
+              AND source_url IS NOT NULL
+            ORDER BY id
+            """,
+            (source_id,)
+        )
+        return await cursor.fetchall()
+
+
+async def enrich_tracks_from_details(session, source_id, tracks):
+    # Include unresolved older records even when they are no longer on
+    # the source homepage, so their detail pages can be checked again.
+    candidates = {}
+
+    for track in tracks:
+        source_url = track.get("source_url")
+        if source_url:
+            candidates[source_url] = dict(track)
+
+    unresolved = await get_tracks_needing_review(source_id)
+    for external_id, source_url in unresolved:
+        if source_url and source_url not in candidates:
+            candidates[source_url] = {
+                "external_id": external_id,
+                "source_url": source_url,
+            }
+
+    semaphore = asyncio.Semaphore(5)
+
+    async def fetch_and_parse(source_url, fallback):
+        async with semaphore:
+            detail_html = await fetch_page(session, source_url)
+
+        if detail_html is None:
+            return fallback
+
+        detail = parse_track_detail(detail_html, source_url)
+        if detail is None:
+            return fallback
+
+        merged = dict(fallback)
+
+        # Prefer values read from the detail page, but retain useful
+        # listing-page values when a detail field is absent.
+        for key in (
+            "external_id",
+            "artist",
+            "title",
+            "release_date",
+            "source_url",
+            "artwork_url",
+            "audio_url",
+            "fingerprint",
+        ):
+            if detail.get(key) is not None:
+                merged[key] = detail[key]
+
+        merged["validation_status"] = detail["validation_status"]
+        merged["validation_note"] = detail["validation_note"]
+        return merged
+
+    urls = list(candidates)
+    results = await asyncio.gather(
+        *(
+            fetch_and_parse(url, candidates[url])
+            for url in urls
+        ),
+        return_exceptions=True
+    )
+
+    enriched = []
+    detail_successes = 0
+
+    for url, result in zip(urls, results):
+        if isinstance(result, Exception):
+            print(f"Detail parse failed: {url} | {result}")
+            fallback = candidates[url]
+            # Do not insert skeletal records that came only from the
+            # unresolved-record lookup if the detail page could not load.
+            if fallback.get("artist") or fallback.get("title"):
+                enriched.append(fallback)
+            continue
+
+        if (
+            result.get("artist")
+            or result.get("title")
+            or result.get("audio_url")
+        ):
+            enriched.append(result)
+            if result.get("validation_note", "").startswith(
+                "Audio filename matches"
+            ) or result.get("validation_note", "").startswith(
+                "Audio filename does not match"
+            ) or result.get("validation_note", "").startswith(
+                "Artist/title metadata"
+            ):
+                detail_successes += 1
+
+    print(
+        f"Musics-fa detail pages: checked {len(urls)}, "
+        f"parsed {detail_successes}"
+    )
+    return enriched
 
 
 async def save_tracks(source_id, tracks):
@@ -198,7 +310,12 @@ async def crawl_source(session, source):
     hostname = (urlparse(source["url"]).hostname or "").lower()
 
     if hostname == "musics-fa.com" or hostname.endswith(".musics-fa.com"):
-        tracks = parse_tracks(html, source["url"])
+        listing_tracks = parse_tracks(html, source["url"])
+        tracks = await enrich_tracks_from_details(
+            session,
+            source["id"],
+            listing_tracks,
+        )
         inserted, updated = await save_tracks(source["id"], tracks)
 
         async with aiosqlite.connect(DB_PATH) as db:
@@ -218,7 +335,8 @@ async def crawl_source(session, source):
         )
 
         print(
-            f"Musics-fa: found {len(tracks)} tracks, "
+            f"Musics-fa: found {len(listing_tracks)} listing tracks, "
+            f"processed {len(tracks)} detail records, "
             f"new {inserted}, updated {updated}, review {review_count}"
         )
 
