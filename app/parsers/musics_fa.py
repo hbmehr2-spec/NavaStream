@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 BASE_URL = "https://musics-fa.com"
 
 PERSIAN_TRACK_RE = re.compile(
-    r"دانلود\s*آهنگ\s*(?P<title>.+?)\s+با\s*صدای\s*(?P<artist>.+?)(?:\s*[،,.!؟]|\s+دانلود|$)",
+    r"دانلود\s*(?:آهنگ|اهنگ)\s*(?P<title>.+?)\s+با\s*صدای\s*(?P<artist>.+?)(?:\s*[،,.!؟]|\s+دانلود|$)",
     re.IGNORECASE,
 )
 ENGLISH_TRACK_RE = re.compile(
