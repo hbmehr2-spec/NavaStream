@@ -85,7 +85,7 @@ async def save_tracks(source_id, tracks):
         await db.execute("PRAGMA foreign_keys=ON")
 
         for track in tracks:
-            await db.execute(
+            insert_cursor = await db.execute(
                 """
                 INSERT OR IGNORE INTO tracks (
                     artist, title, release_date, source_id, source_url,
@@ -109,7 +109,7 @@ async def save_tracks(source_id, tracks):
                 )
             )
 
-            if db.total_changes:
+            if insert_cursor.rowcount > 0:
                 inserted += 1
 
             cursor = await db.execute(
