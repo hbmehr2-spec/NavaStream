@@ -174,7 +174,39 @@ def _has_source_branding(value):
 
 
 def _remove_source_branding_from_mp3(raw_audio):
-    """Remove source-site branding from MP3 tags while preserving other tags."""
+    """Remove source branding from ID3 tags without altering MP3 audio frames."""
+    if not raw_audio:
+        return raw_audio
+
+    def strip_id3v1(audio):
+        if len(audio) >= 128 and audio[-128:-125] == b"TAG":
+            return audio[:-128]
+        return audio
+
+    def strip_corrupt_id3v2(audio):
+        # ID3v2 header: 3-byte signature, version, flags, 4-byte synchsafe size.
+        if len(audio) < 10 or audio[:3] != b"ID3":
+            return strip_id3v1(audio)
+
+        size_bytes = audio[6:10]
+        if any(value & 0x80 for value in size_bytes):
+            raise RuntimeError("Invalid ID3v2 size header; refusing to alter audio.")
+
+        tag_size = (
+            (size_bytes[0] << 21)
+            | (size_bytes[1] << 14)
+            | (size_bytes[2] << 7)
+            | size_bytes[3]
+        )
+        tag_end = 10 + tag_size
+        if tag_end > len(audio):
+            raise RuntimeError(
+                "ID3v2 tag extends beyond the downloaded audio file."
+            )
+
+        # Drop only the malformed metadata block; preserve all MPEG frame bytes.
+        return strip_id3v1(audio[tag_end:])
+
     with tempfile.NamedTemporaryFile(suffix=".mp3") as temporary:
         temporary.write(raw_audio)
         temporary.flush()
@@ -182,7 +214,13 @@ def _remove_source_branding_from_mp3(raw_audio):
         try:
             tags = ID3(temporary.name)
         except ID3NoHeaderError:
-            return raw_audio
+            return strip_id3v1(raw_audio)
+        except Exception as error:
+            print(
+                "Malformed ID3 metadata; removing the complete ID3v2 block "
+                f"while preserving MP3 frames: {error!r}"
+            )
+            return strip_corrupt_id3v2(raw_audio)
 
         for key in list(tags.keys()):
             frame = tags.get(key)
@@ -217,7 +255,6 @@ def _remove_source_branding_from_mp3(raw_audio):
 
         temporary.seek(0)
         return temporary.read()
-
 
 async def _download_thumbnail(session, artwork_url):
     if not artwork_url or not artwork_url.startswith("https://"):
