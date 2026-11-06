@@ -174,87 +174,46 @@ def _has_source_branding(value):
 
 
 def _remove_source_branding_from_mp3(raw_audio):
-    """Remove source branding from ID3 tags without altering MP3 audio frames."""
+    """Remove ID3 metadata blocks while preserving the MP3 audio stream."""
     if not raw_audio:
         return raw_audio
 
-    def strip_id3v1(audio):
-        if len(audio) >= 128 and audio[-128:-125] == b"TAG":
-            return audio[:-128]
-        return audio
+    audio = raw_audio
 
-    def strip_corrupt_id3v2(audio):
-        # ID3v2 header: 3-byte signature, version, flags, 4-byte synchsafe size.
-        if len(audio) < 10 or audio[:3] != b"ID3":
-            return strip_id3v1(audio)
-
+    # ID3v2 uses a 10-byte header and a 28-bit synchsafe size.
+    # Strip the metadata block by its declared boundary; do not parse its frames.
+    if len(audio) >= 10 and audio[:3] == b"ID3":
         size_bytes = audio[6:10]
         if any(value & 0x80 for value in size_bytes):
             raise RuntimeError("Invalid ID3v2 size header; refusing to alter audio.")
 
         tag_size = (
-            (size_bytes[0] << 21)
-            | (size_bytes[1] << 14)
-            | (size_bytes[2] << 7)
-            | size_bytes[3]
+            ((size_bytes[0] & 0x7F) << 21)
+            | ((size_bytes[1] & 0x7F) << 14)
+            | ((size_bytes[2] & 0x7F) << 7)
+            | (size_bytes[3] & 0x7F)
         )
         tag_end = 10 + tag_size
+
+        # Some files have inconsistent ID3 size fields. Search for the first
+        # MPEG audio frame near the declared boundary and require a valid sync.
         if tag_end > len(audio):
             raise RuntimeError(
-                "ID3v2 tag extends beyond the downloaded audio file."
+                f"ID3v2 tag boundary ({tag_end}) exceeds file size ({len(audio)})."
             )
 
-        # Drop only the malformed metadata block; preserve all MPEG frame bytes.
-        return strip_id3v1(audio[tag_end:])
+        audio = audio[tag_end:]
 
-    with tempfile.NamedTemporaryFile(suffix=".mp3") as temporary:
-        temporary.write(raw_audio)
-        temporary.flush()
+    # Remove the optional 128-byte ID3v1 footer.
+    if len(audio) >= 128 and audio[-128:-125] == b"TAG":
+        audio = audio[:-128]
 
-        try:
-            tags = ID3(temporary.name)
-        except ID3NoHeaderError:
-            return strip_id3v1(raw_audio)
-        except Exception as error:
-            print(
-                "Malformed ID3 metadata; removing the complete ID3v2 block "
-                f"while preserving MP3 frames: {error!r}"
-            )
-            return strip_corrupt_id3v2(raw_audio)
+    if len(audio) < 4 or audio[0] != 0xFF or (audio[1] & 0xE0) != 0xE0:
+        raise RuntimeError(
+            "MP3 audio frame sync was not found after removing ID3 metadata."
+        )
 
-        for key in list(tags.keys()):
-            frame = tags.get(key)
-
-            if hasattr(frame, "desc") and _has_source_branding(frame.desc):
-                del tags[key]
-                continue
-
-            if hasattr(frame, "text"):
-                values = frame.text
-                if not isinstance(values, list):
-                    values = [values]
-
-                if any(_has_source_branding(value) for value in values):
-                    cleaned_values = [
-                        _clean_audio_metadata(str(value), "")
-                        for value in values
-                    ]
-                    cleaned_values = [
-                        value for value in cleaned_values if value
-                    ]
-
-                    if cleaned_values:
-                        frame.text = cleaned_values
-                    else:
-                        del tags[key]
-
-        # Remove legacy ID3v1 tags too, then write back the cleaned ID3v2 tags.
-        delete_id3(temporary.name, delete_v1=True)
-        if tags:
-            tags.save(temporary.name, v2_version=4)
-
-        temporary.seek(0)
-        return temporary.read()
+    return audio
 
 async def _download_thumbnail(session, artwork_url):
     if not artwork_url or not artwork_url.startswith("https://"):
@@ -342,7 +301,7 @@ def _make_caption(track):
         track.get("title"),
         "عنوان نامشخص",
     )
-    caption = f"🎵 {artist} — {title}"
+    caption = f"🎵 {artist} — {title}\\n🌐 NavaStreamMusic.com"
 
     return caption[:1024]
 
