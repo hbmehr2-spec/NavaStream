@@ -19,7 +19,7 @@ TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID", "").strip()
 API_BASE = "https://api.telegram.org"
 MAX_ARTWORK_BYTES = 5 * 1024 * 1024
 MAX_THUMBNAIL_BYTES = 200 * 1024
-MIN_SECONDS_BETWEEN_SENDS = 3.2
+MIN_SECONDS_BETWEEN_SENDS = 30.0
 MAX_RATE_LIMIT_RETRIES = 5
 
 
@@ -183,6 +183,7 @@ def _clean_audio_metadata(value, fallback):
     value = value.strip(" \t\r\n-–—|،,؛;:：•·")
     return value or fallback
 
+
 def _make_caption(track):
     artist = _clean_audio_metadata(
         track.get("artist"),
@@ -202,7 +203,8 @@ async def publish_pending_tracks(limit=1):
     Publish matched tracks with HTTPS audio URLs.
     If artwork is available, attach a Telegram-compatible JPEG thumbnail.
     Successful Telegram message IDs are persisted to prevent duplicates.
-    Telegram flood limits are handled using retry_after and paced sends.
+    Telegram flood limits are handled using retry_after and a 30-second
+    minimum interval between consecutive send attempts.
     """
     _configuration()
 
@@ -250,6 +252,10 @@ async def publish_pending_tracks(limit=1):
                     elapsed = time.monotonic() - last_send_time
                     remaining = MIN_SECONDS_BETWEEN_SENDS - elapsed
                     if remaining > 0:
+                        print(
+                            f"Waiting {remaining:.1f}s to respect "
+                            "the Telegram publishing interval."
+                        )
                         await asyncio.sleep(remaining)
 
                 result = await _send_audio_with_retry(
