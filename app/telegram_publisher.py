@@ -1,4 +1,6 @@
+import asyncio
 import os
+import time
 from io import BytesIO
 
 import aiohttp
@@ -16,10 +18,18 @@ TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID", "").strip()
 API_BASE = "https://api.telegram.org"
 MAX_ARTWORK_BYTES = 5 * 1024 * 1024
 MAX_THUMBNAIL_BYTES = 200 * 1024
+MIN_SECONDS_BETWEEN_SENDS = 3.2
+MAX_RATE_LIMIT_RETRIES = 5
 
 
 class TelegramConfigurationError(RuntimeError):
     pass
+
+
+class TelegramRateLimitError(RuntimeError):
+    def __init__(self, message, retry_after):
+        super().__init__(message)
+        self.retry_after = max(1, int(retry_after or 1))
 
 
 def _configuration():
@@ -64,9 +74,36 @@ async def _telegram_request(session, method, data=None, thumbnail=None):
 
     if not payload.get("ok"):
         description = payload.get("description", "Unknown Telegram API error")
+        parameters = payload.get("parameters") or {}
+        retry_after = parameters.get("retry_after")
+        if retry_after:
+            raise TelegramRateLimitError(
+                f"Telegram {method} rate limited: {description}",
+                retry_after,
+            )
         raise RuntimeError(f"Telegram {method} failed: {description}")
 
     return payload["result"]
+
+
+async def _send_audio_with_retry(session, data, thumbnail=None):
+    for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+        try:
+            return await _telegram_request(
+                session,
+                "sendAudio",
+                data,
+                thumbnail=thumbnail,
+            )
+        except TelegramRateLimitError as error:
+            if attempt >= MAX_RATE_LIMIT_RETRIES:
+                raise
+            wait_seconds = error.retry_after + 1
+            print(
+                f"Telegram rate limit: waiting {wait_seconds}s "
+                f"before retry ({attempt + 1}/{MAX_RATE_LIMIT_RETRIES})"
+            )
+            await asyncio.sleep(wait_seconds)
 
 
 async def _download_thumbnail(session, artwork_url):
@@ -145,6 +182,7 @@ async def publish_pending_tracks(limit=1):
     Publish matched tracks with HTTPS audio URLs.
     If artwork is available, attach a Telegram-compatible JPEG thumbnail.
     Successful Telegram message IDs are persisted to prevent duplicates.
+    Telegram flood limits are handled using retry_after and paced sends.
     """
     _configuration()
 
@@ -178,6 +216,7 @@ async def publish_pending_tracks(limit=1):
 
     published = 0
     failed = 0
+    last_send_time = None
 
     async with aiohttp.ClientSession() as session:
         for track in tracks:
@@ -187,9 +226,14 @@ async def publish_pending_tracks(limit=1):
                     track.get("artwork_url"),
                 )
 
-                result = await _telegram_request(
+                if last_send_time is not None:
+                    elapsed = time.monotonic() - last_send_time
+                    remaining = MIN_SECONDS_BETWEEN_SENDS - elapsed
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
+
+                result = await _send_audio_with_retry(
                     session,
-                    "sendAudio",
                     {
                         "chat_id": TARGET_CHAT_ID,
                         "audio": track["audio_url"],
@@ -199,6 +243,7 @@ async def publish_pending_tracks(limit=1):
                     },
                     thumbnail=thumbnail,
                 )
+                last_send_time = time.monotonic()
 
                 async with aiosqlite.connect(DB_PATH) as db:
                     await db.execute(
@@ -224,6 +269,7 @@ async def publish_pending_tracks(limit=1):
                 )
 
             except Exception as error:
+                last_send_time = time.monotonic()
                 async with aiosqlite.connect(DB_PATH) as db:
                     await db.execute(
                         """
