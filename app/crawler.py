@@ -1,8 +1,12 @@
 import aiohttp
 import asyncio
+from urllib.parse import urlparse
+
 from bs4 import BeautifulSoup
-from app.database import DB_PATH
 import aiosqlite
+
+from app.database import DB_PATH
+from app.parsers.musics_fa import parse_tracks
 
 
 USER_AGENT = (
@@ -74,6 +78,60 @@ def extract_page_info(html, page_url):
     }
 
 
+async def save_tracks(source_id, tracks):
+    inserted = 0
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys=ON")
+
+        for track in tracks:
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO tracks (
+                    artist, title, release_date, source_id, source_url,
+                    artwork_url, fingerprint, external_id, audio_url,
+                    validation_status, validation_note, rights_status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown')
+                """,
+                (
+                    track.get("artist"),
+                    track.get("title") or "Unknown title",
+                    track.get("release_date"),
+                    source_id,
+                    track.get("source_url"),
+                    track.get("artwork_url"),
+                    track.get("fingerprint"),
+                    track.get("external_id"),
+                    track.get("audio_url"),
+                    track.get("validation_status", "needs_review"),
+                    track.get("validation_note"),
+                )
+            )
+
+            if db.total_changes:
+                inserted += 1
+
+            cursor = await db.execute(
+                "SELECT id FROM tracks WHERE fingerprint = ?",
+                (track.get("fingerprint"),)
+            )
+            row = await cursor.fetchone()
+
+            if row:
+                await db.execute(
+                    """
+                    INSERT OR IGNORE INTO processing_queue (track_id)
+                    VALUES (?)
+                    """,
+                    (row[0],)
+                )
+
+        await db.commit()
+
+    return inserted
+
+
 async def crawl_source(session, source):
     print(f"Checking: {source['name']}")
 
@@ -81,6 +139,35 @@ async def crawl_source(session, source):
 
     if html is None:
         return None
+
+    hostname = (urlparse(source["url"]).hostname or "").lower()
+
+    if hostname == "musics-fa.com" or hostname.endswith(".musics-fa.com"):
+        tracks = parse_tracks(html, source["url"])
+        inserted = await save_tracks(source["id"], tracks)
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                UPDATE sources
+                SET last_checked_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (source["id"],)
+            )
+            await db.commit()
+
+        print(
+            f"Musics-fa: found {len(tracks)} tracks, "
+            f"new {inserted}, review {sum(1 for item in tracks if item.get('validation_status') != 'matched')}"
+        )
+
+        return {
+            "source_id": source["id"],
+            "source_name": source["name"],
+            "tracks_found": len(tracks),
+            "tracks_inserted": inserted,
+        }
 
     page_info = extract_page_info(html, source["url"])
 
@@ -138,7 +225,14 @@ async def crawl_all_sources():
         if isinstance(result, dict)
     ]
 
+    failures = [
+        result for result in results
+        if isinstance(result, Exception)
+    ]
+
+    for error in failures:
+        print(f"Crawl task failed: {error}")
+
     print(f"Crawl completed: {len(successful)}/{len(sources)}")
 
     return successful
-
