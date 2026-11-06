@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import time
 from io import BytesIO
 
@@ -169,9 +170,29 @@ async def check_telegram_connection():
     }
 
 
+def _clean_audio_metadata(value, fallback):
+    """Remove source-site branding from Telegram's audio title/performer fields."""
+    value = (value or "").strip()
+    value = re.sub(
+        r"(?i)(?:https?://)?(?:www\\.)?music[-_ ]?fa(?:\\.com)?",
+        " ",
+        value,
+    )
+    value = re.sub(r"موزیک\\s*فا", " ", value)
+    value = re.sub(r"\\s+", " ", value)
+    value = value.strip(" \\t\\r\\n-–—|،,؛;:：•·")
+    return value or fallback
+
+
 def _make_caption(track):
-    artist = (track.get("artist") or "هنرمند نامشخص").strip()
-    title = (track.get("title") or "عنوان نامشخص").strip()
+    artist = _clean_audio_metadata(
+        track.get("artist"),
+        "هنرمند نامشخص",
+    )
+    title = _clean_audio_metadata(
+        track.get("title"),
+        "عنوان نامشخص",
+    )
     caption = f"🎵 {artist} — {title}"
 
     return caption[:1024]
@@ -238,8 +259,14 @@ async def publish_pending_tracks(limit=1):
                         "chat_id": TARGET_CHAT_ID,
                         "audio": track["audio_url"],
                         "caption": _make_caption(track),
-                        "title": (track.get("title") or "عنوان نامشخص")[:64],
-                        "performer": (track.get("artist") or "هنرمند نامشخص")[:64],
+                        "title": _clean_audio_metadata(
+                            track.get("title"),
+                            "عنوان نامشخص",
+                        )[:64],
+                        "performer": _clean_audio_metadata(
+                            track.get("artist"),
+                            "هنرمند نامشخص",
+                        )[:64],
                     },
                     thumbnail=thumbnail,
                 )
