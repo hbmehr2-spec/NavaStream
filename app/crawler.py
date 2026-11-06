@@ -94,7 +94,7 @@ async def save_tracks(source_id, tracks):
             if external_id:
                 cursor = await db.execute(
                     """
-                    SELECT id
+                    SELECT id, validation_status
                     FROM tracks
                     WHERE source_id = ? AND external_id = ?
                     LIMIT 1
@@ -106,7 +106,7 @@ async def save_tracks(source_id, tracks):
             if existing is None and fingerprint:
                 cursor = await db.execute(
                     """
-                    SELECT id
+                    SELECT id, validation_status
                     FROM tracks
                     WHERE fingerprint = ?
                     LIMIT 1
@@ -130,26 +130,34 @@ async def save_tracks(source_id, tracks):
             )
 
             if existing:
-                await db.execute(
-                    """
-                    UPDATE tracks
-                    SET artist = ?,
-                        title = ?,
-                        release_date = ?,
-                        source_id = ?,
-                        source_url = ?,
-                        artwork_url = ?,
-                        fingerprint = ?,
-                        external_id = ?,
-                        audio_url = ?,
-                        validation_status = ?,
-                        validation_note = ?
-                    WHERE id = ?
-                    """,
-                    (*values, existing[0])
+                # Never let an incomplete crawl downgrade a previously matched record.
+                incoming_status = track.get(
+                    "validation_status", "needs_review"
                 )
+                if not (
+                    existing[1] == "matched"
+                    and incoming_status != "matched"
+                ):
+                    await db.execute(
+                        """
+                        UPDATE tracks
+                        SET artist = ?,
+                            title = ?,
+                            release_date = ?,
+                            source_id = ?,
+                            source_url = ?,
+                            artwork_url = ?,
+                            fingerprint = ?,
+                            external_id = ?,
+                            audio_url = ?,
+                            validation_status = ?,
+                            validation_note = ?
+                        WHERE id = ?
+                        """,
+                        (*values, existing[0])
+                    )
+                    updated += 1
                 track_id = existing[0]
-                updated += 1
             else:
                 cursor = await db.execute(
                     """
@@ -256,11 +264,9 @@ async def crawl_all_sources():
         ssl=False
     )
 
-    headers = {"User-Agent": USER_AGENT}
-
+    # Use the site's default response; its custom-UA variant omits artist metadata.
     async with aiohttp.ClientSession(
-        connector=connector,
-        headers=headers
+        connector=connector
     ) as session:
 
         tasks = [
