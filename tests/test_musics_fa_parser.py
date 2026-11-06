@@ -60,6 +60,39 @@ class MusicsFaParserTests(unittest.TestCase):
         self.assertEqual(tracks[0]["title"], "بارون ببار")
         self.assertEqual(tracks[0]["validation_status"], "matched")
 
+    def test_ignores_spaces_and_punctuation_in_artist_filename(self):
+        cases = [
+            ("Sami Lone", "SamiLone", "Az Man Bekesh Biroon"),
+            ("Mehdi Vazife Dan", "Mehdi Vazifedan", "Gorg"),
+            ("Jamshid.Jam", "JamshidJam", "Toro Mikham"),
+            ("DJ M.O", "DJ MO", "From Silence To Epic"),
+        ]
+
+        for index, (artist, filename_artist, title) in enumerate(cases):
+            with self.subTest(artist=artist):
+                html = f"""
+                <article class="mf_pst" data-id="test{index}">
+                  <header><h2><a href="/download-song/test{index}/">Track</a></h2></header>
+                  <p>Download New Music BY : {artist} | {title} With Text And 2 Quality 320 And 128 On Music-fa</p>
+                  <span class="play" data-song="https://example.com/{filename_artist}%20-%20{title.replace(' ', '%20')}.mp3"></span>
+                </article>
+                """
+
+                tracks = parse_tracks(html)
+                self.assertEqual(tracks[0]["validation_status"], "matched")
+
+    def test_uncertain_artist_transliteration_needs_review(self):
+        html = """
+        <article class="mf_pst" data-id="128394">
+          <header><h2><a href="/download-song/128394/">Track</a></h2></header>
+          <p>Download New Music BY : Janiar | Azize Ghalbam With Text And 2 Quality 320 And 128 On Music-fa</p>
+          <span class="play" data-song="https://example.com/Janyar%20-%20Azize%20Ghalbam.mp3"></span>
+        </article>
+        """
+
+        tracks = parse_tracks(html)
+        self.assertEqual(tracks[0]["validation_status"], "needs_review")
+
 
 if __name__ == "__main__":
     unittest.main()
