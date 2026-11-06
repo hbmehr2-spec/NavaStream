@@ -11,7 +11,8 @@ async def main():
     print("Database initialized successfully.")
     print(f"Sources: {stats['sources']}")
     print(f"Tracks: {stats['tracks']}")
-    print(f"Pending jobs: {stats['pending']}")
+    print(f"Pending review jobs: {stats['pending']}")
+    print(f"Tracks needing metadata review: {stats['needs_review']}")
     print("NavaStream is ready.")
 
 
