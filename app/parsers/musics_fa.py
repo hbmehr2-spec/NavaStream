@@ -1,4 +1,5 @@
 import re
+from difflib import SequenceMatcher
 from html import unescape
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urljoin, urlparse
@@ -37,19 +38,38 @@ def _normalise_filename(value):
     return " ".join(value.split())
 
 
+def _compact(value):
+    return re.sub(r"[^a-z0-9]", "", _normalise_filename(value))
+
+
 def _audio_matches(audio_url, english_artist, english_title):
     if not audio_url or not english_artist or not english_title:
         return None
 
     path = PurePosixPath(urlparse(audio_url).path)
-    filename = _normalise_filename(path.name)
-    artist = _normalise_filename(english_artist)
-    title = _normalise_filename(english_title)
+    filename = _compact(path.name)
+    artist = _compact(english_artist)
+    title = _compact(english_title)
 
     if not filename or not artist or not title:
         return None
 
-    return artist in filename and title in filename
+    # Ignore harmless differences in spaces and punctuation.
+    if artist in filename and title in filename:
+        return True
+
+    # A close artist transliteration with an exact title is uncertain,
+    # not a confirmed match and not a definite mismatch.
+    if title in filename:
+        artist_from_filename = filename.split(title, 1)[0].strip()
+        if artist_from_filename:
+            similarity = SequenceMatcher(
+                None, artist, artist_from_filename
+            ).ratio()
+            if similarity >= 0.80:
+                return None
+
+    return False
 
 
 def _extract_track_identity(article, audio_url):
@@ -92,7 +112,7 @@ def _extract_track_identity(article, audio_url):
         validation_note = "Audio filename does not match the English artist and title metadata."
     else:
         validation_status = "needs_review"
-        validation_note = "Not enough metadata to verify the audio filename."
+        validation_note = "Artist/title metadata is incomplete or has an uncertain transliteration."
 
     return artist, title, validation_status, validation_note
 
