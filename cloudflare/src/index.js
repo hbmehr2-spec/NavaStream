@@ -30,7 +30,7 @@ function trackPayload(row) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const path = url.pathname.replace(/\\/+$/, "") || "/";
+    const path = url.pathname.replace(/\/+$/, "") || "/";
 
     if (request.method === "OPTIONS") {
       return new Response(null, {
@@ -93,7 +93,7 @@ export default {
         });
       }
 
-      const match = path.match(/^\\/v1\\/tracks\\/(\\d+)$/);
+      const match = path.match(/^\/v1\/tracks\/(\d+)$/);
       if (match) {
         const row = await env.DB.prepare(
           "SELECT id, title, artist, audio_url, artwork_url, duration_seconds, published_at FROM tracks WHERE id = ? AND telegram_message_id IS NOT NULL AND audio_url LIKE 'https://%' LIMIT 1"
