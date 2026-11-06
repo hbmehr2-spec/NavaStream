@@ -1,12 +1,14 @@
 import asyncio
 import os
 import re
+import tempfile
 import time
 from io import BytesIO
 
 import aiohttp
 import aiosqlite
 from dotenv import load_dotenv
+from mutagen.id3 import ID3, ID3NoHeaderError, delete as delete_id3
 from PIL import Image
 
 from app.database import DB_PATH
@@ -17,6 +19,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID", "").strip()
 API_BASE = "https://api.telegram.org"
+MAX_AUDIO_BYTES = 49 * 1024 * 1024
 MAX_ARTWORK_BYTES = 5 * 1024 * 1024
 MAX_THUMBNAIL_BYTES = 200 * 1024
 MIN_SECONDS_BETWEEN_SENDS = 30.0
@@ -45,20 +48,34 @@ def _configuration():
     return BOT_TOKEN, TARGET_CHAT_ID
 
 
-async def _telegram_request(session, method, data=None, thumbnail=None):
+async def _telegram_request(
+    session,
+    method,
+    data=None,
+    thumbnail=None,
+    audio_file=None,
+):
     token, _ = _configuration()
     url = f"{API_BASE}/bot{token}/{method}"
 
-    if thumbnail:
+    if thumbnail is not None or audio_file is not None:
         form = aiohttp.FormData()
         for key, value in (data or {}).items():
             form.add_field(key, str(value))
-        form.add_field(
-            "thumbnail",
-            thumbnail,
-            filename="cover.jpg",
-            content_type="image/jpeg",
-        )
+        if audio_file is not None:
+            form.add_field(
+                "audio",
+                audio_file,
+                filename="audio.mp3",
+                content_type="audio/mpeg",
+            )
+        if thumbnail is not None:
+            form.add_field(
+                "thumbnail",
+                thumbnail,
+                filename="cover.jpg",
+                content_type="image/jpeg",
+            )
         request_data = form
         request_json = None
     else:
@@ -69,7 +86,7 @@ async def _telegram_request(session, method, data=None, thumbnail=None):
         url,
         data=request_data,
         json=request_json,
-        timeout=aiohttp.ClientTimeout(total=60),
+        timeout=aiohttp.ClientTimeout(total=180),
     ) as response:
         payload = await response.json(content_type=None)
 
@@ -87,7 +104,12 @@ async def _telegram_request(session, method, data=None, thumbnail=None):
     return payload["result"]
 
 
-async def _send_audio_with_retry(session, data, thumbnail=None):
+async def _send_audio_with_retry(
+    session,
+    data,
+    audio_file,
+    thumbnail=None,
+):
     for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
         try:
             return await _telegram_request(
@@ -95,6 +117,7 @@ async def _send_audio_with_retry(session, data, thumbnail=None):
                 "sendAudio",
                 data,
                 thumbnail=thumbnail,
+                audio_file=audio_file,
             )
         except TelegramRateLimitError as error:
             if attempt >= MAX_RATE_LIMIT_RETRIES:
@@ -105,6 +128,94 @@ async def _send_audio_with_retry(session, data, thumbnail=None):
                 f"before retry ({attempt + 1}/{MAX_RATE_LIMIT_RETRIES})"
             )
             await asyncio.sleep(wait_seconds)
+
+
+async def _download_audio(session, audio_url):
+    if not audio_url or not audio_url.startswith("https://"):
+        raise RuntimeError("Audio URL must use HTTPS.")
+
+    async with session.get(
+        audio_url,
+        timeout=aiohttp.ClientTimeout(total=180),
+    ) as response:
+        if response.status != 200:
+            raise RuntimeError(
+                f"Audio download failed with HTTP {response.status}."
+            )
+
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > MAX_AUDIO_BYTES:
+            raise RuntimeError(
+                "Audio file exceeds Telegram's 50 MB bot upload limit."
+            )
+
+        raw_audio = await response.content.read(MAX_AUDIO_BYTES + 1)
+
+    if not raw_audio:
+        raise RuntimeError("Downloaded audio file is empty.")
+    if len(raw_audio) > MAX_AUDIO_BYTES:
+        raise RuntimeError(
+            "Audio file exceeds Telegram's 50 MB bot upload limit."
+        )
+
+    return _remove_source_branding_from_mp3(raw_audio)
+
+
+def _has_source_branding(value):
+    text = str(value or "").lower()
+    return (
+        "music-fa" in text
+        or "musics-fa" in text
+        or "musicfa" in text
+        or "musicsfa" in text
+        or "موزیک فا" in text
+    )
+
+
+def _remove_source_branding_from_mp3(raw_audio):
+    """Remove source-site branding from MP3 tags while preserving other tags."""
+    with tempfile.NamedTemporaryFile(suffix=".mp3") as temporary:
+        temporary.write(raw_audio)
+        temporary.flush()
+
+        try:
+            tags = ID3(temporary.name)
+        except ID3NoHeaderError:
+            return raw_audio
+
+        for key in list(tags.keys()):
+            frame = tags.get(key)
+
+            if hasattr(frame, "desc") and _has_source_branding(frame.desc):
+                del tags[key]
+                continue
+
+            if hasattr(frame, "text"):
+                values = frame.text
+                if not isinstance(values, list):
+                    values = [values]
+
+                if any(_has_source_branding(value) for value in values):
+                    cleaned_values = [
+                        _clean_audio_metadata(str(value), "")
+                        for value in values
+                    ]
+                    cleaned_values = [
+                        value for value in cleaned_values if value
+                    ]
+
+                    if cleaned_values:
+                        frame.text = cleaned_values
+                    else:
+                        del tags[key]
+
+        # Remove legacy ID3v1 tags too, then write back the cleaned ID3v2 tags.
+        delete_id3(temporary.name, delete_v1=True)
+        if tags:
+            tags.save(temporary.name, v2_version=4)
+
+        temporary.seek(0)
+        return temporary.read()
 
 
 async def _download_thumbnail(session, artwork_url):
@@ -174,7 +285,7 @@ def _clean_audio_metadata(value, fallback):
     """Remove source-site branding from Telegram's audio title/performer fields."""
     value = (value or "").strip()
     value = re.sub(
-        r"(?i)(?:https?://)?(?:www\.)?music[-_ ]?fa(?:\.com)?",
+        r"(?i)(?:https?://)?(?:www\.)?musics?[-_ ]?fa(?:\.?com)?",
         " ",
         value,
     )
@@ -200,8 +311,9 @@ def _make_caption(track):
 
 async def publish_pending_tracks(limit=1):
     """
-    Publish matched tracks with HTTPS audio URLs.
-    If artwork is available, attach a Telegram-compatible JPEG thumbnail.
+    Publish matched tracks after downloading and cleaning their MP3 metadata.
+    Audio is uploaded as a file instead of asking Telegram to fetch the source
+    URL, so embedded source-site branding can be removed before publication.
     Successful Telegram message IDs are persisted to prevent duplicates.
     Telegram flood limits are handled using retry_after and a 30-second
     minimum interval between consecutive send attempts.
@@ -243,6 +355,10 @@ async def publish_pending_tracks(limit=1):
     async with aiohttp.ClientSession() as session:
         for track in tracks:
             try:
+                audio_file = await _download_audio(
+                    session,
+                    track["audio_url"],
+                )
                 thumbnail = await _download_thumbnail(
                     session,
                     track.get("artwork_url"),
@@ -262,7 +378,6 @@ async def publish_pending_tracks(limit=1):
                     session,
                     {
                         "chat_id": TARGET_CHAT_ID,
-                        "audio": track["audio_url"],
                         "caption": _make_caption(track),
                         "title": _clean_audio_metadata(
                             track.get("title"),
@@ -273,6 +388,7 @@ async def publish_pending_tracks(limit=1):
                             "هنرمند نامشخص",
                         )[:64],
                     },
+                    audio_file=audio_file,
                     thumbnail=thumbnail,
                 )
                 last_send_time = time.monotonic()
