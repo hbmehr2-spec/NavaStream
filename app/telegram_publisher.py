@@ -174,15 +174,14 @@ def _clean_audio_metadata(value, fallback):
     """Remove source-site branding from Telegram's audio title/performer fields."""
     value = (value or "").strip()
     value = re.sub(
-        r"(?i)(?:https?://)?(?:www\\.)?music[-_ ]?fa(?:\\.com)?",
+        r"(?i)(?:https?://)?(?:www\.)?music[-_ ]?fa(?:\.com)?",
         " ",
         value,
     )
-    value = re.sub(r"موزیک\\s*فا", " ", value)
-    value = re.sub(r"\\s+", " ", value)
-    value = value.strip(" \\t\\r\\n-–—|،,؛;:：•·")
+    value = re.sub(r"موزیک\s*فا", " ", value)
+    value = re.sub(r"\s+", " ", value)
+    value = value.strip(" \t\r\n-–—|،,؛;:：•·")
     return value or fallback
-
 
 def _make_caption(track):
     artist = _clean_audio_metadata(
