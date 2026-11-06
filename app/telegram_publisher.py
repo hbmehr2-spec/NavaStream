@@ -1,8 +1,10 @@
 import os
+from io import BytesIO
 
 import aiohttp
 import aiosqlite
 from dotenv import load_dotenv
+from PIL import Image
 
 from app.database import DB_PATH
 
@@ -12,6 +14,8 @@ load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID", "").strip()
 API_BASE = "https://api.telegram.org"
+MAX_ARTWORK_BYTES = 5 * 1024 * 1024
+MAX_THUMBNAIL_BYTES = 200 * 1024
 
 
 class TelegramConfigurationError(RuntimeError):
@@ -30,14 +34,31 @@ def _configuration():
     return BOT_TOKEN, TARGET_CHAT_ID
 
 
-async def _telegram_request(session, method, data=None):
+async def _telegram_request(session, method, data=None, thumbnail=None):
     token, _ = _configuration()
     url = f"{API_BASE}/bot{token}/{method}"
 
+    if thumbnail:
+        form = aiohttp.FormData()
+        for key, value in (data or {}).items():
+            form.add_field(key, str(value))
+        form.add_field(
+            "thumbnail",
+            thumbnail,
+            filename="cover.jpg",
+            content_type="image/jpeg",
+        )
+        request_data = form
+        request_json = None
+    else:
+        request_data = None
+        request_json = data
+
     async with session.post(
         url,
-        json=data,
-        timeout=aiohttp.ClientTimeout(total=45),
+        data=request_data,
+        json=request_json,
+        timeout=aiohttp.ClientTimeout(total=60),
     ) as response:
         payload = await response.json(content_type=None)
 
@@ -46,6 +67,48 @@ async def _telegram_request(session, method, data=None):
         raise RuntimeError(f"Telegram {method} failed: {description}")
 
     return payload["result"]
+
+
+async def _download_thumbnail(session, artwork_url):
+    if not artwork_url or not artwork_url.startswith("https://"):
+        return None
+
+    try:
+        async with session.get(
+            artwork_url,
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as response:
+            if response.status != 200:
+                return None
+
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > MAX_ARTWORK_BYTES:
+                return None
+
+            raw_image = await response.content.read(MAX_ARTWORK_BYTES + 1)
+            if len(raw_image) > MAX_ARTWORK_BYTES:
+                return None
+
+        with Image.open(BytesIO(raw_image)) as source:
+            image = source.convert("RGB")
+            image.thumbnail((320, 320))
+
+            for quality in (88, 80, 72, 64, 56):
+                output = BytesIO()
+                image.save(
+                    output,
+                    format="JPEG",
+                    quality=quality,
+                    optimize=True,
+                )
+                thumbnail = output.getvalue()
+                if len(thumbnail) <= MAX_THUMBNAIL_BYTES:
+                    return thumbnail
+
+        return None
+    except Exception as error:
+        print(f"Artwork thumbnail unavailable: {error}")
+        return None
 
 
 async def check_telegram_connection():
@@ -83,7 +146,8 @@ def _make_caption(track):
 
 async def publish_pending_tracks(limit=1):
     """
-    Publish only matched tracks with HTTPS audio URLs.
+    Publish matched tracks with HTTPS audio URLs.
+    If artwork is available, attach a Telegram-compatible JPEG thumbnail.
     Successful Telegram message IDs are persisted to prevent duplicates.
     """
     _configuration()
@@ -98,7 +162,8 @@ async def publish_pending_tracks(limit=1):
                 t.artist,
                 t.title,
                 t.source_url,
-                t.audio_url
+                t.audio_url,
+                t.artwork_url
             FROM processing_queue AS q
             JOIN tracks AS t ON t.id = q.track_id
             WHERE q.status = 'pending'
@@ -121,6 +186,11 @@ async def publish_pending_tracks(limit=1):
     async with aiohttp.ClientSession() as session:
         for track in tracks:
             try:
+                thumbnail = await _download_thumbnail(
+                    session,
+                    track.get("artwork_url"),
+                )
+
                 result = await _telegram_request(
                     session,
                     "sendAudio",
@@ -128,7 +198,10 @@ async def publish_pending_tracks(limit=1):
                         "chat_id": TARGET_CHAT_ID,
                         "audio": track["audio_url"],
                         "caption": _make_caption(track),
+                        "title": (track.get("title") or "عنوان نامشخص")[:64],
+                        "performer": (track.get("artist") or "هنرمند نامشخص")[:64],
                     },
+                    thumbnail=thumbnail,
                 )
 
                 async with aiosqlite.connect(DB_PATH) as db:
