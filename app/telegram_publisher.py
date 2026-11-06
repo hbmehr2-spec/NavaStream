@@ -23,7 +23,7 @@ API_BASE = "https://api.telegram.org"
 MAX_AUDIO_BYTES = 49 * 1024 * 1024
 MAX_ARTWORK_BYTES = 5 * 1024 * 1024
 MAX_THUMBNAIL_BYTES = 200 * 1024
-MIN_SECONDS_BETWEEN_SENDS = 30.0
+MIN_SECONDS_BETWEEN_SENDS = 15.0
 MAX_RATE_LIMIT_RETRIES = 5
 
 
@@ -323,7 +323,7 @@ async def publish_pending_tracks(limit=1):
     Audio is uploaded as a file instead of asking Telegram to fetch the source
     URL, so embedded source-site branding can be removed before publication.
     Successful Telegram message IDs are persisted to prevent duplicates.
-    Telegram flood limits are handled using retry_after and a 30-second
+    Telegram flood limits are handled using retry_after and a 15-second
     minimum interval between consecutive send attempts.
     """
     _configuration()
