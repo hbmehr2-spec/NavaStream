@@ -117,6 +117,76 @@ def _extract_track_identity(article, audio_url):
     return artist, title, validation_status, validation_note
 
 
+def _extract_artwork(article, page_url):
+    image = article.select_one("img")
+    if not image:
+        return None
+
+    artwork_url = (
+        image.get("data-src")
+        or image.get("data-lazy-src")
+        or image.get("src")
+    )
+    return urljoin(page_url, artwork_url) if artwork_url else None
+
+
+def parse_track_detail(html, page_url):
+    """Parse one Musics-fa song detail page."""
+    soup = BeautifulSoup(html, "html.parser")
+    article = soup.select_one("article.mf_pst")
+    if not article:
+        return None
+
+    player = article.select_one("span.play[data-song]")
+    audio_url = (
+        urljoin(page_url, player.get("data-song", ""))
+        if player and player.get("data-song")
+        else None
+    )
+
+    artist, title, validation_status, validation_note = _extract_track_identity(
+        article,
+        audio_url,
+    )
+
+    external_id = _clean(article.get("data-id"))
+    if not external_id:
+        match = re.search(r"/download-song/(\d+)/?", urlparse(page_url).path)
+        external_id = match.group(1) if match else None
+
+    heading_tag = article.select_one("header h1, header h2, h1, h2")
+    heading = _clean(heading_tag.get_text(" ", strip=True)) if heading_tag else None
+    if not title:
+        title = re.sub(
+            r"^دانلود\s*(?:آهنگ|اهنگ)\s*",
+            "",
+            heading or "",
+            flags=re.IGNORECASE,
+        ) or heading
+
+    date_tag = article.select_one("header div span")
+    release_date = (
+        _clean(date_tag.get_text(" ", strip=True))
+        if date_tag else None
+    )
+
+    if not external_id and not audio_url and not artist and not title:
+        return None
+
+    return {
+        "external_id": external_id,
+        "artist": artist,
+        "title": title,
+        "release_date": release_date,
+        "source_url": page_url,
+        "artwork_url": _extract_artwork(article, page_url),
+        "audio_url": audio_url,
+        "fingerprint": f"musics-fa:{external_id}" if external_id else page_url,
+        "validation_status": validation_status,
+        "validation_note": validation_note,
+    }
+
+
 def parse_tracks(html, page_url=BASE_URL):
     soup = BeautifulSoup(html, "html.parser")
     articles = soup.select("article.mf_pst")
@@ -134,13 +204,7 @@ def parse_tracks(html, page_url=BASE_URL):
 
         date_tag = article.select_one("header div span")
         release_date = _clean(date_tag.get_text(" ", strip=True)) if date_tag else None
-
-        image = article.select_one("img")
-        artwork_url = None
-        if image:
-            artwork_url = image.get("data-src") or image.get("data-lazy-src") or image.get("src")
-            if artwork_url:
-                artwork_url = urljoin(page_url, artwork_url)
+        artwork_url = _extract_artwork(article, page_url)
 
         artist, title, validation_status, validation_note = _extract_track_identity(
             article,
