@@ -9,12 +9,13 @@ from bs4 import BeautifulSoup
 BASE_URL = "https://musics-fa.com"
 
 PERSIAN_TRACK_RE = re.compile(
-    r"دانلود\\s*(?:آهنگ|اهنگ)\\s*(?P<title>.+?)\\s+با\\s*صدای\\s*(?P<artist>.+?)"
-    r"(?=(?:\\s+به\\s+همراه|\\s+با\\s+کیفیت|\\s+دانلود|\\s*[♫♪]|[،,.!؟]|$))",
+    r"دانلود\s*(?:آهنگ|اهنگ)\s*(?P<title>.+?)\s+با\s*صدای\s*(?P<artist>.+?)"
+    r"(?=(?:\s+به\s+همراه|\s+با\s+کیفیت|\s+دانلود|\s*[♫♪]|[،,.!؟]|$))",
     re.IGNORECASE,
 )
 ENGLISH_TRACK_RE = re.compile(
-    r"(?:BY\\s*: ?\\s*)(?P<artist>[^|\\n]+?)\\s*\\|\\s*(?P<title>[^|\\n]+)",
+    r"BY\s*:\s*(?P<artist>[^|\n]+?)\s*\|\s*(?P<title>[^|\n]+?)"
+    r"(?=\s+With\s+(?:Text|Lyrics)\b|\s+And\s+\d+\s+Quality\b|\s+On\s+Music-fa\b|$)",
     re.IGNORECASE,
 )
 AUDIO_EXTENSIONS = (".mp3", ".m4a", ".flac", ".wav", ".aac", ".ogg")
@@ -25,13 +26,13 @@ def _clean(value):
         return None
     value = unescape(str(value))
     value = re.sub(r"<[^>]+>", " ", value)
-    value = re.sub(r"\\s+", " ", value).strip(" \\t\\r\\n-–—|،,؛;")
+    value = re.sub(r"\s+", " ", value).strip(" \t\r\n-–—|،,؛;")
     return value or None
 
 
 def _normalise_filename(value):
     value = unquote(value or "").lower()
-    value = re.sub(r"\\.(mp3|m4a|flac|wav|aac|ogg)(?:\\?.*)?$", "", value)
+    value = re.sub(r"\.(mp3|m4a|flac|wav|aac|ogg)(?:\?.*)?$", "", value)
     value = re.sub(r"[^a-z0-9]+", " ", value)
     return " ".join(value.split())
 
@@ -60,8 +61,6 @@ def _extract_track_identity(article, audio_url):
     persian_match = None
     english_match = None
 
-    # Musics-fa places Persian and English metadata in separate paragraphs.
-    # Inspect all paragraphs instead of assuming the first one contains metadata.
     for paragraph in paragraphs:
         if not paragraph:
             continue
@@ -130,7 +129,7 @@ def parse_tracks(html, page_url=BASE_URL):
 
         heading = _clean(link.get_text(" ", strip=True))
         if not title:
-            title = re.sub(r"^دانلود\\s*(?:آهنگ|اهنگ)\\s*", "", heading or "", flags=re.IGNORECASE) or heading
+            title = re.sub(r"^دانلود\s*(?:آهنگ|اهنگ)\s*", "", heading or "", flags=re.IGNORECASE) or heading
 
         fingerprint = f"musics-fa:{external_id}" if external_id else source_url
 
