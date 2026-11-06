@@ -80,56 +80,103 @@ def extract_page_info(html, page_url):
 
 async def save_tracks(source_id, tracks):
     inserted = 0
+    updated = 0
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("PRAGMA foreign_keys=ON")
 
         for track in tracks:
-            insert_cursor = await db.execute(
-                """
-                INSERT OR IGNORE INTO tracks (
-                    artist, title, release_date, source_id, source_url,
-                    artwork_url, fingerprint, external_id, audio_url,
-                    validation_status, validation_note, rights_status
+            existing = None
+
+            external_id = track.get("external_id")
+            fingerprint = track.get("fingerprint")
+
+            if external_id:
+                cursor = await db.execute(
+                    """
+                    SELECT id
+                    FROM tracks
+                    WHERE source_id = ? AND external_id = ?
+                    LIMIT 1
+                    """,
+                    (source_id, external_id)
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown')
-                """,
-                (
-                    track.get("artist"),
-                    track.get("title") or "Unknown title",
-                    track.get("release_date"),
-                    source_id,
-                    track.get("source_url"),
-                    track.get("artwork_url"),
-                    track.get("fingerprint"),
-                    track.get("external_id"),
-                    track.get("audio_url"),
-                    track.get("validation_status", "needs_review"),
-                    track.get("validation_note"),
+                existing = await cursor.fetchone()
+
+            if existing is None and fingerprint:
+                cursor = await db.execute(
+                    """
+                    SELECT id
+                    FROM tracks
+                    WHERE fingerprint = ?
+                    LIMIT 1
+                    """,
+                    (fingerprint,)
                 )
+                existing = await cursor.fetchone()
+
+            values = (
+                track.get("artist"),
+                track.get("title") or "Unknown title",
+                track.get("release_date"),
+                source_id,
+                track.get("source_url"),
+                track.get("artwork_url"),
+                fingerprint,
+                external_id,
+                track.get("audio_url"),
+                track.get("validation_status", "needs_review"),
+                track.get("validation_note"),
             )
 
-            if insert_cursor.rowcount > 0:
-                inserted += 1
-
-            cursor = await db.execute(
-                "SELECT id FROM tracks WHERE fingerprint = ?",
-                (track.get("fingerprint"),)
-            )
-            row = await cursor.fetchone()
-
-            if row:
+            if existing:
                 await db.execute(
                     """
-                    INSERT OR IGNORE INTO processing_queue (track_id)
-                    VALUES (?)
+                    UPDATE tracks
+                    SET artist = ?,
+                        title = ?,
+                        release_date = ?,
+                        source_id = ?,
+                        source_url = ?,
+                        artwork_url = ?,
+                        fingerprint = ?,
+                        external_id = ?,
+                        audio_url = ?,
+                        validation_status = ?,
+                        validation_note = ?
+                    WHERE id = ?
                     """,
-                    (row[0],)
+                    (*values, existing[0])
                 )
+                track_id = existing[0]
+                updated += 1
+            else:
+                cursor = await db.execute(
+                    """
+                    INSERT INTO tracks (
+                        artist, title, release_date, source_id, source_url,
+                        artwork_url, fingerprint, external_id, audio_url,
+                        validation_status, validation_note, rights_status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown')
+                    """,
+                    values
+                )
+                track_id = cursor.lastrowid
+                inserted += 1
+
+            # Preserve any existing queue status, attempts and error history.
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO processing_queue (track_id)
+                VALUES (?)
+                """,
+                (track_id,)
+            )
 
         await db.commit()
 
-    return inserted
+    return inserted, updated
 
 
 async def crawl_source(session, source):
@@ -144,7 +191,7 @@ async def crawl_source(session, source):
 
     if hostname == "musics-fa.com" or hostname.endswith(".musics-fa.com"):
         tracks = parse_tracks(html, source["url"])
-        inserted = await save_tracks(source["id"], tracks)
+        inserted, updated = await save_tracks(source["id"], tracks)
 
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
@@ -157,9 +204,14 @@ async def crawl_source(session, source):
             )
             await db.commit()
 
+        review_count = sum(
+            1 for item in tracks
+            if item.get("validation_status") != "matched"
+        )
+
         print(
             f"Musics-fa: found {len(tracks)} tracks, "
-            f"new {inserted}, review {sum(1 for item in tracks if item.get('validation_status') != 'matched')}"
+            f"new {inserted}, updated {updated}, review {review_count}"
         )
 
         return {
@@ -167,6 +219,7 @@ async def crawl_source(session, source):
             "source_name": source["name"],
             "tracks_found": len(tracks),
             "tracks_inserted": inserted,
+            "tracks_updated": updated,
         }
 
     page_info = extract_page_info(html, source["url"])
