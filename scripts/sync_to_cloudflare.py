@@ -85,6 +85,8 @@ def send_batch(secret, tracks):
         headers={
             "Authorization": f"Bearer {secret}",
             "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": "curl/8.10.1",
+            "Accept": "application/json",
         },
     )
 
