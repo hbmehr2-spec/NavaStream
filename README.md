@@ -1,8 +1,8 @@
 # NavaStream
 
-Automated music discovery, review, and Telegram publishing platform.
+Automated music discovery, review, and Telegram publishing platform, with a read-only API for the NavaStream Android app.
 
-## Core Features
+## Core features
 
 - Discover new music releases from configured sources
 - Extract and validate track metadata
@@ -10,12 +10,7 @@ Automated music discovery, review, and Telegram publishing platform.
 - Resume processing after internet interruptions
 - Publish matched tracks to the configured Telegram channel
 - Record Telegram message IDs to prevent duplicate publication
-
-## Project Structure
-
-- `app/`: Application source code
-- `data/`: Local database and persistent state
-- `logs/`: Application logs
+- Serve published tracks, Persian metadata, and cover-art URLs to the Android app
 
 ## Telegram destination
 
@@ -34,22 +29,57 @@ TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_TARGET_CHAT_ID=@NavaStreamMusic
 ```
 
-The database migration adds Telegram message tracking to `processing_queue`.
-Only tracks with `validation_status = 'matched'` and an HTTPS audio URL are eligible.
-The publisher is deliberately not started automatically; first verify the connection
-and then publish one test track manually.
+Only tracks with `validation_status = 'matched'` and an HTTPS audio URL are eligible for publishing. The publisher is not started automatically; verify the connection and publish test tracks manually.
 
-Verify bot and channel access:
+## Read-only music API
 
-```bash
-python -c "import asyncio; from app.telegram_publisher import check_telegram_connection; print(asyncio.run(check_telegram_connection()))"
+The API exposes only tracks successfully published to Telegram. Pending, rejected, and review-needed tracks are never returned.
+
+- `GET /health` — service and published-track count
+- `GET /v1/tracks?limit=30&q=<search>&cursor=<offset>` — newest published tracks, optionally searched by Persian title or artist
+- `GET /v1/tracks/{id}` — one published track
+
+Example response:
+
+```json
+{
+  "items": [
+    {
+      "id": "123",
+      "title": "نام آهنگ",
+      "artist": "نام خواننده",
+      "audioUrl": "https://cdn.example.com/audio/track.mp3",
+      "artworkUrl": "https://cdn.example.com/covers/track.jpg",
+      "durationSeconds": null,
+      "publishedAt": "2026-11-06 12:00:00"
+    }
+  ],
+  "nextCursor": null
+}
 ```
 
-Publish at most one eligible track:
+Run locally from the project root:
 
 ```bash
-python -c "import asyncio; from app.telegram_publisher import publish_pending_tracks; print(asyncio.run(publish_pending_tracks(limit=1)))"
+pip install -r requirements.txt
+uvicorn app.api:app --host 0.0.0.0 --port 8000
 ```
 
-A successful send stores the Telegram message ID and marks that queue item as
-published, preventing the same item from being sent again.
+The API uses the same SQLite database as the crawler and publisher. Set `NAVASTREAM_DB_PATH` if the database is stored elsewhere. It opens the database read-only.
+
+## Container deployment
+
+```bash
+docker build -t navastream-api .
+docker run --restart unless-stopped -p 8000:8000 \
+  -v /absolute/path/to/data:/app/data:ro \
+  -e NAVASTREAM_DB_PATH=/app/data/navastream.db \
+  navastream-api
+```
+
+Put a TLS-enabled reverse proxy in front of port 8000 before exposing the API publicly.
+
+## Android app
+
+The Android app is maintained in the separate private repository:
+https://github.com/hbmehr2-spec/NavaStream-Android
