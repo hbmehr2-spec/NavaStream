@@ -310,7 +310,45 @@ async def crawl_source(session, source):
     hostname = (urlparse(source["url"]).hostname or "").lower()
 
     if hostname == "musics-fa.com" or hostname.endswith(".musics-fa.com"):
-        listing_tracks = parse_tracks(html, source["url"])
+        # The homepage contains only one page of songs (about 20).
+        # Walk recent archive pages so a single crawl can build a useful catalog.
+        max_listing_pages = 10
+        listing_tracks = []
+        seen_listing_urls = set()
+
+        for page_number in range(1, max_listing_pages + 1):
+            if page_number == 1:
+                page_url = source["url"]
+                page_html = html
+            else:
+                page_url = f"https://{hostname}/page/{page_number}/"
+                page_html = await fetch_page(session, page_url)
+
+            if page_html is None:
+                print(f"Musics-fa pagination stopped at page {page_number}: fetch failed")
+                break
+
+            page_tracks = parse_tracks(page_html, page_url)
+            if not page_tracks:
+                print(f"Musics-fa pagination stopped at page {page_number}: no tracks found")
+                break
+
+            added_on_page = 0
+            for item in page_tracks:
+                item_url = item.get("source_url")
+                if item_url and item_url not in seen_listing_urls:
+                    seen_listing_urls.add(item_url)
+                    listing_tracks.append(item)
+                    added_on_page += 1
+
+            print(
+                f"Musics-fa listing page {page_number}: "
+                f"{len(page_tracks)} tracks, {added_on_page} new"
+            )
+
+            if added_on_page == 0:
+                break
+
         tracks = await enrich_tracks_from_details(
             session,
             source["id"],
