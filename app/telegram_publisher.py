@@ -195,8 +195,7 @@ def _remove_source_branding_from_mp3(raw_audio):
         )
         tag_end = 10 + tag_size
 
-        # Some files have inconsistent ID3 size fields. Search for the first
-        # MPEG audio frame near the declared boundary and require a valid sync.
+        # Validate the declared boundary before removing the metadata block.
         if tag_end > len(audio):
             raise RuntimeError(
                 f"ID3v2 tag boundary ({tag_end}) exceeds file size ({len(audio)})."
