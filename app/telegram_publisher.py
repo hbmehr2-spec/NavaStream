@@ -3,6 +3,7 @@ import os
 import re
 import tempfile
 import time
+import traceback
 from io import BytesIO
 
 import aiohttp
@@ -256,7 +257,7 @@ async def _download_thumbnail(session, artwork_url):
 
         return None
     except Exception as error:
-        print(f"Artwork thumbnail unavailable: {error}")
+        print(f"Artwork thumbnail unavailable: {error!r}")
         return None
 
 
@@ -418,6 +419,10 @@ async def publish_pending_tracks(limit=1):
 
             except Exception as error:
                 last_send_time = time.monotonic()
+                error_details = (
+                    f"{type(error).__name__}: {error!r}\n"
+                    f"{traceback.format_exc()}"
+                )
                 async with aiosqlite.connect(DB_PATH) as db:
                     await db.execute(
                         """
@@ -428,12 +433,15 @@ async def publish_pending_tracks(limit=1):
                         WHERE id = ?
                           AND telegram_message_id IS NULL
                         """,
-                        (str(error)[:1000], track["queue_id"]),
+                        (error_details[:1000], track["queue_id"]),
                     )
                     await db.commit()
 
                 failed += 1
-                print(f"Telegram publish failed for track {track['track_id']}: {error}")
+                print(
+                    f"Telegram publish failed for track "
+                    f"{track['track_id']}: {error_details}"
+                )
 
     return {
         "published": published,
