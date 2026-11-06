@@ -19,6 +19,15 @@ ENGLISH_TRACK_RE = re.compile(
     r"(?=\s+With\s+(?:Text|Lyrics)\b|\s+And\s+\d+\s+Quality\b|\s+On\s+Music-fa\b|$)",
     re.IGNORECASE,
 )
+PERSIAN_ARCHIVE_ARTIST_RE = re.compile(
+    r"آرشیو\s+آهنگ\s+های\s+(?P<artist>.+?)"
+    r"(?=\s+آرشیو\s+آهنگ\s+های|\s+کانال\s+رسمی|\s+پخش\s+آنلاین|\s+دانلود\s+آهنگ|$)",
+    re.IGNORECASE,
+)
+PERSIAN_BREADCRUMB_ARTIST_RE = re.compile(
+    r"موزیکفا\s*[•|]\s*(?P<artist>[^•|]+?)\s*[•|]",
+    re.IGNORECASE,
+)
 AUDIO_EXTENSIONS = (".mp3", ".m4a", ".flac", ".wav", ".aac", ".ogg")
 
 
@@ -72,6 +81,30 @@ def _audio_matches(audio_url, english_artist, english_title):
     return False
 
 
+def _extract_archive_artist(paragraphs):
+    for paragraph in paragraphs:
+        if not paragraph:
+            continue
+
+        match = PERSIAN_ARCHIVE_ARTIST_RE.search(paragraph)
+        if match:
+            artist = _clean(match.group("artist"))
+            if artist:
+                return artist
+
+    for paragraph in paragraphs:
+        if not paragraph:
+            continue
+
+        match = PERSIAN_BREADCRUMB_ARTIST_RE.search(paragraph)
+        if match:
+            artist = _clean(match.group("artist"))
+            if artist:
+                return artist
+
+    return None
+
+
 def _extract_track_identity(article, audio_url):
     paragraphs = [
         _clean(item.get_text(" ", strip=True))
@@ -98,7 +131,7 @@ def _extract_track_identity(article, audio_url):
     english_title = _clean(english_match.group("title")) if english_match else None
 
     if not artist:
-        artist = english_artist
+        artist = english_artist or _extract_archive_artist(paragraphs)
     if not title:
         title = english_title
 
