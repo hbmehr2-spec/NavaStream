@@ -19,7 +19,7 @@ Automated music discovery, review, and Telegram publishing platform.
 
 ## Telegram destination
 
-Target channel: https://t.me/caferavandApp
+Target channel: https://t.me/NavaStreamMusic
 
 1. Create a bot with [@BotFather](https://t.me/BotFather).
 2. Add the bot to the target channel as an administrator.
@@ -31,7 +31,7 @@ Example local configuration:
 
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_TARGET_CHAT_ID=@caferavandApp
+TELEGRAM_TARGET_CHAT_ID=@NavaStreamMusic
 ```
 
 The database migration adds Telegram message tracking to `processing_queue`.
