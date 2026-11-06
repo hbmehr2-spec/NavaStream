@@ -137,10 +137,6 @@ def _make_caption(track):
     title = (track.get("title") or "عنوان نامشخص").strip()
     caption = f"🎵 {artist} — {title}"
 
-    source_url = track.get("source_url")
-    if source_url:
-        caption += f"\n\nمنبع: {source_url}"
-
     return caption[:1024]
 
 
