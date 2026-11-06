@@ -4,6 +4,15 @@ from pathlib import Path
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "navastream.db"
 
 
+async def _ensure_column(db, table, column, definition):
+    cursor = await db.execute(f"PRAGMA table_info({table})")
+    columns = {row[1] for row in await cursor.fetchall()}
+    if column not in columns:
+        await db.execute(
+            f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+        )
+
+
 async def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -33,6 +42,10 @@ async def init_db():
             fingerprint TEXT UNIQUE,
             rights_status TEXT NOT NULL DEFAULT 'unknown',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            external_id TEXT,
+            audio_url TEXT,
+            validation_status TEXT NOT NULL DEFAULT 'needs_review',
+            validation_note TEXT,
             FOREIGN KEY (source_id) REFERENCES sources(id)
         );
 
@@ -58,19 +71,27 @@ async def init_db():
         ON processing_queue(status);
         """)
 
+        await _ensure_column(db, "tracks", "external_id", "TEXT")
+        await _ensure_column(db, "tracks", "audio_url", "TEXT")
+        await _ensure_column(
+            db, "tracks", "validation_status",
+            "TEXT NOT NULL DEFAULT 'needs_review'"
+        )
+        await _ensure_column(db, "tracks", "validation_note", "TEXT")
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tracks_external_id
+            ON tracks(source_id, external_id)
+        """)
         await db.commit()
 
 
 async def get_stats():
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM sources"
-        )
+        cursor = await db.execute("SELECT COUNT(*) FROM sources")
         sources = (await cursor.fetchone())[0]
 
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM tracks"
-        )
+        cursor = await db.execute("SELECT COUNT(*) FROM tracks")
         tracks = (await cursor.fetchone())[0]
 
         cursor = await db.execute(
@@ -78,8 +99,14 @@ async def get_stats():
         )
         pending = (await cursor.fetchone())[0]
 
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM tracks WHERE validation_status = 'needs_review'"
+        )
+        needs_review = (await cursor.fetchone())[0]
+
         return {
             "sources": sources,
             "tracks": tracks,
-            "pending": pending
+            "pending": pending,
+            "needs_review": needs_review,
         }
