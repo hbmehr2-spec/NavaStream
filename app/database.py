@@ -78,6 +78,8 @@ async def init_db():
             "TEXT NOT NULL DEFAULT 'needs_review'"
         )
         await _ensure_column(db, "tracks", "validation_note", "TEXT")
+        await _ensure_column(db, "processing_queue", "telegram_message_id", "INTEGER")
+        await _ensure_column(db, "processing_queue", "published_at", "TEXT")
 
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_tracks_external_id
