@@ -1,6 +1,6 @@
 import unittest
 
-from app.parsers.musics_fa import parse_tracks
+from app.parsers.musics_fa import parse_track_detail, parse_tracks
 
 
 class MusicsFaParserTests(unittest.TestCase):
@@ -80,6 +80,42 @@ class MusicsFaParserTests(unittest.TestCase):
 
                 tracks = parse_tracks(html)
                 self.assertEqual(tracks[0]["validation_status"], "matched")
+
+    def test_parses_song_detail_page_without_listing_link(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>Download New Music</h1></header>
+          <p>Download New Music BY : DJ M.O | From Silence To Epic With Text And 2 Quality 320 And 128 On Music-fa</p>
+          <span class="play" data-song="https://dls.musics-fa.com/DJ%20MO%20-%20From%20Silence%20To%20Epic.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/128388/",
+        )
+
+        self.assertIsNotNone(track)
+        self.assertEqual(track["external_id"], "128388")
+        self.assertEqual(track["artist"], "DJ M.O")
+        self.assertEqual(track["title"], "From Silence To Epic")
+        self.assertEqual(track["validation_status"], "matched")
+
+    def test_detail_page_keeps_uncertain_transliteration_for_review(self):
+        html = """
+        <article class="mf_pst">
+          <p>Download New Music BY : Janiar | Azize Ghalbam With Text And 2 Quality 320 And 128 On Music-fa</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Janyar%20-%20Azize%20Ghalbam.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/128394/",
+        )
+
+        self.assertEqual(track["external_id"], "128394")
+        self.assertEqual(track["validation_status"], "needs_review")
 
     def test_uncertain_artist_transliteration_needs_review(self):
         html = """
