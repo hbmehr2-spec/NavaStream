@@ -90,14 +90,14 @@ jobs:
           text = config.read_text()
           text = text.replace("REPLACE_WITH_D1_DATABASE_ID", database_id)
           text = re.sub(
-              r'(?m)^database_id\\s*=\\s*".*"$',
+              r'(?m)^database_id\s*=\s*".*"$',
               f'database_id = "{database_id}"',
               text,
           )
           config.write_text(text)
 
           with open(os.environ["GITHUB_ENV"], "a") as env_file:
-              env_file.write(f"NAVASTREAM_D1_ID={database_id}\\n")
+              env_file.write(f"NAVASTREAM_D1_ID={database_id}\n")
           print("Wrangler configuration prepared.")
           PY
 
@@ -128,7 +128,7 @@ jobs:
         run: |
           set -o pipefail
           npx --yes wrangler@4 deploy 2>&1 | tee deploy-output.txt
-          WORKER_URL="$(grep -Eo 'https://navastream-api\\.[a-zA-Z0-9-]+\\.workers\\.dev' deploy-output.txt | tail -n 1 || true)"
+          WORKER_URL="$(grep -Eo 'https://navastream-api\.[a-zA-Z0-9-]+\.workers\.dev' deploy-output.txt | tail -n 1 || true)"
           if [ -n "$WORKER_URL" ]; then
             echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
             echo "Worker URL: $WORKER_URL"
