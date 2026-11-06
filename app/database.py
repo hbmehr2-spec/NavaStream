@@ -83,6 +83,13 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_tracks_external_id
             ON tracks(source_id, external_id)
         """)
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO sources (name, url)
+            VALUES (?, ?)
+            """,
+            ("Musics-fa", "https://musics-fa.com/")
+        )
         await db.commit()
 
 
