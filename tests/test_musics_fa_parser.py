@@ -101,6 +101,28 @@ class MusicsFaParserTests(unittest.TestCase):
         self.assertEqual(track["title"], "From Silence To Epic")
         self.assertEqual(track["validation_status"], "matched")
 
+    def test_extracts_artist_from_archive_text_without_false_audio_match(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>دانلود آهنگ یکی نفسم بود گرفت نفسم ریمیکس</h1></header>
+          <p>دانلود آهنگ یکی نفسم بود گرفت نفسم ریمیکس</p>
+          <p>Download Old Music BY : Yeki Nafasem Bood With Text And 2 Quality 320 And 128 On Music-fa</p>
+          <p>موزیکفا • رضا کرمی تارا • دانلود آهنگ یکی نفسم بود گرفت نفسم ریمیکس</p>
+          <p>پخش آنلاین آهنگ دانلود آهنگ با کیفیت 320 دانلود آهنگ با کیفیت 128 آرشیو آهنگ های رضا کرمی تارا کانال رسمی تلگرام موزیکفا</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Unknown%20Artist%20-%20Yeki%20Nafasem%20Bood%20Remix.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/128468/",
+        )
+
+        self.assertEqual(track["artist"], "رضا کرمی تارا")
+        self.assertEqual(track["title"], "یکی نفسم بود گرفت نفسم ریمیکس")
+        self.assertEqual(track["validation_status"], "needs_review")
+        self.assertIn("incomplete", track["validation_note"])
+
     def test_detail_page_keeps_uncertain_transliteration_for_review(self):
         html = """
         <article class="mf_pst">
