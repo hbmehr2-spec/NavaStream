@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from app.database import DB_PATH
 
 
+load_dotenv()
+
 API_URL = os.getenv(
     "NAVASTREAM_API_URL",
     "https://navastream-api.hb-mehr2.workers.dev",
