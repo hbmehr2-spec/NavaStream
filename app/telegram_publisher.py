@@ -150,14 +150,26 @@ async def _download_audio(session, audio_url):
                 "Audio file exceeds Telegram's 50 MB bot upload limit."
             )
 
-        raw_audio = await response.content.read(MAX_AUDIO_BYTES + 1)
+        chunks = []
+        downloaded = 0
+        async for chunk in response.content.iter_chunked(64 * 1024):
+            downloaded += len(chunk)
+            if downloaded > MAX_AUDIO_BYTES:
+                raise RuntimeError(
+                    "Audio file exceeds Telegram's 50 MB bot upload limit."
+                )
+            chunks.append(chunk)
+
+        raw_audio = b"".join(chunks)
+
+        if content_length and downloaded != int(content_length):
+            raise RuntimeError(
+                f"Incomplete audio download: expected {content_length} bytes, "
+                f"received {downloaded} bytes."
+            )
 
     if not raw_audio:
         raise RuntimeError("Downloaded audio file is empty.")
-    if len(raw_audio) > MAX_AUDIO_BYTES:
-        raise RuntimeError(
-            "Audio file exceeds Telegram's 50 MB bot upload limit."
-        )
 
     return _remove_source_branding_from_mp3(raw_audio)
 
