@@ -300,7 +300,7 @@ def _make_caption(track):
         track.get("title"),
         "عنوان نامشخص",
     )
-    caption = f"🎵 {artist} — {title}\\n🌐 NavaStreamMusic.com"
+    caption = f"🎵 {artist} — {title}\n🌐 NavaStreamMusic.com"
 
     return caption[:1024]
 
