@@ -247,6 +247,13 @@ async def _download_thumbnail(session, artwork_url):
                 return None
 
         with Image.open(BytesIO(raw_image)) as source:
+            metadata_text = " ".join(
+                f"{key}={value}" for key, value in source.info.items()
+            )
+            if _has_source_branding(metadata_text):
+                print("Artwork rejected because its embedded metadata contains source branding.")
+                return None
+
             image = source.convert("RGB")
             image.thumbnail((320, 320))
 
@@ -257,6 +264,7 @@ async def _download_thumbnail(session, artwork_url):
                     format="JPEG",
                     quality=quality,
                     optimize=True,
+                    exif=b"",
                 )
                 thumbnail = output.getvalue()
                 if len(thumbnail) <= MAX_THUMBNAIL_BYTES:
@@ -344,6 +352,7 @@ async def publish_pending_tracks(limit=1, track_id=None):
             JOIN tracks AS t ON t.id = q.track_id
             WHERE q.status = 'pending'
               AND t.validation_status = 'matched'
+              AND q.status = 'pending'
               AND t.audio_url LIKE 'https://%'
               AND q.telegram_message_id IS NULL
               AND (? IS NULL OR t.id = ?)
@@ -372,9 +381,12 @@ async def publish_pending_tracks(limit=1, track_id=None):
                     session,
                     track["audio_url"],
                 )
-                # Keep the first test publication free of source artwork.
-                # Cover images can be re-enabled after their branding is reviewed.
-                thumbnail = None
+                # Re-encode artwork as a metadata-free JPEG before attaching it.
+                # If the artwork cannot be safely processed, publish without a thumbnail.
+                thumbnail = await _download_thumbnail(
+                    session,
+                    track.get("artwork_url"),
+                )
 
                 if last_send_time is not None:
                     elapsed = time.monotonic() - last_send_time
