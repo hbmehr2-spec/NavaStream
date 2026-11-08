@@ -367,10 +367,9 @@ async def publish_pending_tracks(limit=1):
                     session,
                     track["audio_url"],
                 )
-                thumbnail = await _download_thumbnail(
-                    session,
-                    track.get("artwork_url"),
-                )
+                # Keep the first test publication free of source artwork.
+                # Cover images can be re-enabled after their branding is reviewed.
+                thumbnail = None
 
                 if last_send_time is not None:
                     elapsed = time.monotonic() - last_send_time
