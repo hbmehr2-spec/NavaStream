@@ -317,7 +317,7 @@ def _make_caption(track):
     return caption[:1024]
 
 
-async def publish_pending_tracks(limit=1):
+async def publish_pending_tracks(limit=1, track_id=None):
     """
     Publish matched tracks after downloading and cleaning their MP3 metadata.
     Audio is uploaded as a file instead of asking Telegram to fetch the source
@@ -346,10 +346,15 @@ async def publish_pending_tracks(limit=1):
               AND t.validation_status = 'matched'
               AND t.audio_url LIKE 'https://%'
               AND q.telegram_message_id IS NULL
+              AND (? IS NULL OR t.id = ?)
             ORDER BY q.created_at, q.id
             LIMIT ?
             """,
-            (max(1, int(limit)),),
+            (
+                None if track_id is None else int(track_id),
+                None if track_id is None else int(track_id),
+                max(1, int(limit)),
+            ),
         )
         tracks = [dict(row) for row in await cursor.fetchall()]
 
