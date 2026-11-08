@@ -38,7 +38,7 @@ jobs:
       - name: Restore persistent SQLite database
         uses: actions/cache@v4
         with:
-          path: data/navastream.db
+          path: data/
           key: navastream-sqlite-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             navastream-sqlite-
