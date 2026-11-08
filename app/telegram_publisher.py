@@ -25,6 +25,11 @@ MAX_ARTWORK_BYTES = 5 * 1024 * 1024
 MAX_THUMBNAIL_BYTES = 200 * 1024
 MIN_SECONDS_BETWEEN_SENDS = 15.0
 MAX_RATE_LIMIT_RETRIES = 5
+MADDahi_PATTERN = re.compile(
+    r"مداحی|مداح|نوحه(?:خوانی)?|روضه(?:خوانی)?|مرثیه(?:خوانی)?|"
+    r"سینه[\s‌_-]*زنی|\b(?:maddahi|madahi|noheh|nohe|rowzeh|rawzeh|marsiyeh)\b",
+    re.IGNORECASE,
+)
 
 
 class TelegramConfigurationError(RuntimeError):
@@ -410,6 +415,33 @@ async def publish_pending_tracks(limit=1, track_id=None):
             ),
         )
         tracks = [dict(row) for row in await cursor.fetchall()]
+
+        # A final safety gate also protects older pending records that were
+        # classified before the parser learned to exclude religious recitations.
+        publishable = []
+        for track in tracks:
+            searchable = " ".join(
+                str(track.get(key) or "")
+                for key in ("artist", "title", "source_url", "audio_url")
+            ).replace("\u200c", " ")
+            if MADDahi_PATTERN.search(searchable):
+                await db.execute(
+                    """
+                    UPDATE processing_queue
+                    SET status = 'excluded',
+                        last_error = 'Excluded: religious recitation/maddahi content.',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                      AND status = 'pending'
+                      AND telegram_message_id IS NULL
+                    """,
+                    (track["queue_id"],),
+                )
+                print(f"Excluded maddahi/religious recitation track {track['track_id']}.")
+            else:
+                publishable.append(track)
+        await db.commit()
+        tracks = publishable
 
     if not tracks:
         return {"published": 0, "failed": 0, "message": "No eligible tracks."}
