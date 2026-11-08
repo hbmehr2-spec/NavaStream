@@ -10,7 +10,7 @@ import aiohttp
 import aiosqlite
 from dotenv import load_dotenv
 from mutagen.id3 import ID3, ID3NoHeaderError, delete as delete_id3
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from app.database import DB_PATH
 
@@ -226,6 +226,50 @@ def _remove_source_branding_from_mp3(raw_audio):
 
     return audio
 
+def _make_navastream_thumbnail():
+    """Create a source-independent cover so no source watermark can leak."""
+    image = Image.new("RGB", (320, 320))
+    pixels = image.load()
+
+    for y in range(320):
+        for x in range(320):
+            blend = int((x + y) / 638 * 42)
+            pixels[x, y] = (18 + blend // 3, 27 + blend // 2, 58 + blend)
+
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((54, 54, 266, 266), outline=(104, 151, 218), width=3)
+    draw.ellipse((78, 78, 242, 242), outline=(65, 111, 183), width=2)
+
+    center_x, center_y = 160, 160
+    heights = (18, 34, 52, 70, 86, 70, 52, 34, 18, 30, 48, 30, 18)
+    for index, height in enumerate(heights):
+        x = 94 + index * 11
+        draw.rounded_rectangle(
+            (x, center_y - height // 2, x + 5, center_y + height // 2),
+            radius=3,
+            fill=(224, 235, 255),
+        )
+
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 20)
+    except OSError:
+        font = ImageFont.load_default()
+
+    label = "NavaStream"
+    bounds = draw.textbbox((0, 0), label, font=font)
+    draw.text(
+        ((320 - (bounds[2] - bounds[0])) / 2, 270),
+        label,
+        font=font,
+        fill=(235, 242, 255),
+    )
+
+    output = BytesIO()
+    image.save(output, format="JPEG", quality=88, optimize=True, exif=b"")
+    thumbnail = output.getvalue()
+    return thumbnail if len(thumbnail) <= MAX_THUMBNAIL_BYTES else None
+
+
 async def _download_thumbnail(session, artwork_url):
     if not artwork_url or not artwork_url.startswith("https://"):
         return None
@@ -381,12 +425,9 @@ async def publish_pending_tracks(limit=1, track_id=None):
                     session,
                     track["audio_url"],
                 )
-                # Re-encode artwork as a metadata-free JPEG before attaching it.
-                # If the artwork cannot be safely processed, publish without a thumbnail.
-                thumbnail = await _download_thumbnail(
-                    session,
-                    track.get("artwork_url"),
-                )
+                # Never attach source artwork automatically: visible watermarks
+                # cannot be reliably removed by metadata stripping alone.
+                thumbnail = _make_navastream_thumbnail()
 
                 if last_send_time is not None:
                     elapsed = time.monotonic() - last_send_time
