@@ -543,7 +543,7 @@ async def publish_pending_tracks(limit=1, track_id=None):
             except Exception as error:
                 last_send_time = time.monotonic()
                 error_details = (
-                    f"{type(error).__name__}: {error!r}\\n"
+                    f"{type(error).__name__}: {error!r}\n"
                     f"{traceback.format_exc()}"
                 )
                 queue_status = (
@@ -554,7 +554,7 @@ async def publish_pending_tracks(limit=1, track_id=None):
                 stored_error = (
                     error_details
                     if len(error_details) <= 4000
-                    else error_details[:500] + "\\n... traceback truncated ...\\n" + error_details[-3500:]
+                    else error_details[:500] + "\n... traceback truncated ...\n" + error_details[-3500:]
                 )
                 async with aiosqlite.connect(DB_PATH) as db:
                     await db.execute(
