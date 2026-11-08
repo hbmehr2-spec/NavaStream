@@ -1,8 +1,7 @@
 name: NavaStream Telegram Auto Publisher
 
 on:
-  schedule:
-    - cron: "*/10 * * * *"
+  # Scheduled publishing is paused until the first manual test is verified.
   workflow_dispatch:
 
 permissions:
