@@ -296,13 +296,8 @@ async def _download_thumbnail(session, artwork_url):
                 return None
 
         with Image.open(BytesIO(raw_image)) as source:
-            metadata_text = " ".join(
-                f"{key}={value}" for key, value in source.info.items()
-            )
-            if _has_source_branding(metadata_text):
-                print("Artwork rejected because its embedded metadata contains source branding.")
-                return None
-
+            # Use the artwork supplied with the track, including source artwork.
+            # Watermark review/removal is intentionally deferred.
             image = source.convert("RGB")
             image.thumbnail((320, 320))
 
@@ -379,6 +374,8 @@ async def publish_pending_tracks(limit=1, track_id=None):
     Publish matched tracks after downloading and cleaning their MP3 metadata.
     Audio is uploaded as a file instead of asking Telegram to fetch the source
     URL, so embedded source-site branding can be removed before publication.
+    Track artwork is used as the Telegram audio thumbnail when available;
+    the NavaStream-branded cover is the fallback.
     Successful Telegram message IDs are persisted to prevent duplicates.
     Telegram flood limits are handled using retry_after and a 15-second
     minimum interval between consecutive send attempts.
@@ -457,9 +454,14 @@ async def publish_pending_tracks(limit=1, track_id=None):
                     session,
                     track["audio_url"],
                 )
-                # Never attach source artwork automatically: visible watermarks
-                # cannot be reliably removed by metadata stripping alone.
-                thumbnail = _make_navastream_thumbnail()
+                # Prefer the track's own artwork. If it is missing or cannot
+                # be downloaded/processed, use the NavaStream fallback cover.
+                thumbnail = await _download_thumbnail(
+                    session,
+                    track.get("artwork_url"),
+                )
+                if thumbnail is None:
+                    thumbnail = _make_navastream_thumbnail()
 
                 if last_send_time is not None:
                     elapsed = time.monotonic() - last_send_time
