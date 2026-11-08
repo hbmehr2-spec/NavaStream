@@ -248,7 +248,7 @@ async def save_tracks(source_id, tracks):
                 )
                 if not (
                     existing[1] == "matched"
-                    and incoming_status != "matched"
+                    and incoming_status not in ("matched", "excluded")
                 ):
                     await db.execute(
                         """
@@ -293,6 +293,31 @@ async def save_tracks(source_id, tracks):
                 """,
                 (track_id,)
             )
+
+            if track.get("validation_status") == "excluded":
+                await db.execute(
+                    """
+                    UPDATE processing_queue
+                    SET status = "excluded",
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE track_id = ?
+                      AND status = "pending"
+                      AND telegram_message_id IS NULL
+                    """,
+                    (track_id,),
+                )
+            elif track.get("validation_status") == "matched":
+                await db.execute(
+                    """
+                    UPDATE processing_queue
+                    SET status = "pending",
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE track_id = ?
+                      AND status = "excluded"
+                      AND telegram_message_id IS NULL
+                    """,
+                    (track_id,),
+                )
 
         await db.commit()
 
