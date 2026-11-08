@@ -291,8 +291,23 @@ async def _download_thumbnail(session, artwork_url):
             if content_length and int(content_length) > MAX_ARTWORK_BYTES:
                 return None
 
-            raw_image = await response.content.read(MAX_ARTWORK_BYTES + 1)
-            if len(raw_image) > MAX_ARTWORK_BYTES:
+            chunks = []
+            downloaded = 0
+            async for chunk in response.content.iter_chunked(64 * 1024):
+                downloaded += len(chunk)
+                if downloaded > MAX_ARTWORK_BYTES:
+                    return None
+                chunks.append(chunk)
+
+            if content_length and downloaded != int(content_length):
+                print(
+                    "Artwork download incomplete: "
+                    f"expected {content_length} bytes, received {downloaded} bytes."
+                )
+                return None
+
+            raw_image = b"".join(chunks)
+            if not raw_image:
                 return None
 
         with Image.open(BytesIO(raw_image)) as source:
