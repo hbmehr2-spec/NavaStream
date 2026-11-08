@@ -30,6 +30,11 @@ PERSIAN_BREADCRUMB_ARTIST_RE = re.compile(
 )
 AUDIO_EXTENSIONS = (".mp3", ".m4a", ".flac", ".wav", ".aac", ".ogg")
 
+MADDahi_RE = re.compile(
+    r"مداحی|مداح|نوحه(?:خوانی)?|روضه(?:خوانی)?|مرثیه(?:خوانی)?|سینه[\s‌_-]*زنی",
+    re.IGNORECASE,
+)
+
 
 def _clean(value):
     if not value:
@@ -134,6 +139,23 @@ def _extract_track_identity(article, audio_url):
         artist = english_artist or _extract_archive_artist(paragraphs)
     if not title:
         title = english_title
+
+    classification_text = " ".join(
+        (
+            article.get_text(" ", strip=True),
+            audio_url or "",
+            artist or "",
+            title or "",
+        )
+    ).replace("\u200c", " ")
+
+    if MADDahi_RE.search(classification_text):
+        return (
+            artist,
+            title,
+            "excluded",
+            "Religious recitation/maddahi content is excluded from publishing.",
+        )
 
     audio_match = _audio_matches(audio_url, english_artist, english_title)
 
