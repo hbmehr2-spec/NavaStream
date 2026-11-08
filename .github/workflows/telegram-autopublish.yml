@@ -1,0 +1,63 @@
+name: NavaStream Telegram Auto Publisher
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: navastream-telegram-autopublish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_TARGET_CHAT_ID: ${{ secrets.TELEGRAM_TARGET_CHAT_ID }}
+      NAVASTREAM_INGEST_SECRET: ${{ secrets.NAVASTREAM_INGEST_SECRET }}
+      NAVASTREAM_API_URL: https://navastream-api.hb-mehr2.workers.dev
+      NAVASTREAM_CRAWL_INTERVAL_MINUTES: "60"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Restore persistent SQLite database
+        uses: actions/cache@v4
+        with:
+          path: data/navastream.db
+          key: navastream-sqlite-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            navastream-sqlite-
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          test -n "$TELEGRAM_BOT_TOKEN" || { echo "::error::Missing TELEGRAM_BOT_TOKEN repository secret"; exit 1; }
+          test -n "$NAVASTREAM_INGEST_SECRET" || { echo "::error::Missing NAVASTREAM_INGEST_SECRET repository secret"; exit 1; }
+          test "${#NAVASTREAM_INGEST_SECRET}" -ge 32 || { echo "::error::NAVASTREAM_INGEST_SECRET must contain at least 32 characters"; exit 1; }
+          if [ -z "$TELEGRAM_TARGET_CHAT_ID" ]; then
+            echo "TELEGRAM_TARGET_CHAT_ID is empty; using @NavaStreamMusic."
+            echo "TELEGRAM_TARGET_CHAT_ID=@NavaStreamMusic" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run one automation cycle
+        run: python -m scripts.automation_runner
