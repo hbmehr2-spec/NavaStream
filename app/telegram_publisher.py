@@ -42,6 +42,10 @@ class TelegramRateLimitError(RuntimeError):
         self.retry_after = max(1, int(retry_after or 1))
 
 
+class TelegramUploadOutcomeUnknown(RuntimeError):
+    """The connection failed during upload, so Telegram's acceptance is unknown."""
+
+
 def _configuration():
     if not BOT_TOKEN:
         raise TelegramConfigurationError(
@@ -134,6 +138,12 @@ async def _send_audio_with_retry(
                 f"before retry ({attempt + 1}/{MAX_RATE_LIMIT_RETRIES})"
             )
             await asyncio.sleep(wait_seconds)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+            raise TelegramUploadOutcomeUnknown(
+                "Telegram connection was lost during sendAudio. "
+                "The message may or may not have been accepted; "
+                "verify the channel before retrying."
+            ) from error
 
 
 async def _download_audio(session, audio_url):
@@ -533,24 +543,42 @@ async def publish_pending_tracks(limit=1, track_id=None):
             except Exception as error:
                 last_send_time = time.monotonic()
                 error_details = (
-                    f"{type(error).__name__}: {error!r}\n"
+                    f"{type(error).__name__}: {error!r}\\n"
                     f"{traceback.format_exc()}"
+                )
+                queue_status = (
+                    "uncertain"
+                    if isinstance(error, TelegramUploadOutcomeUnknown)
+                    else "pending"
+                )
+                stored_error = (
+                    error_details
+                    if len(error_details) <= 4000
+                    else error_details[:500] + "\\n... traceback truncated ...\\n" + error_details[-3500:]
                 )
                 async with aiosqlite.connect(DB_PATH) as db:
                     await db.execute(
                         """
                         UPDATE processing_queue
-                        SET attempts = attempts + 1,
+                        SET status = ?,
+                            attempts = attempts + 1,
                             last_error = ?,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                           AND telegram_message_id IS NULL
+                          AND status = 'pending'
                         """,
-                        (error_details[:1000], track["queue_id"]),
+                        (queue_status, stored_error, track["queue_id"]),
                     )
                     await db.commit()
 
                 failed += 1
+                if queue_status == "uncertain":
+                    print(
+                        f"Telegram outcome is uncertain for track {track['track_id']}; "
+                        "queue status changed to 'uncertain'. Check the channel "
+                        "before manually returning it to pending."
+                    )
                 print(
                     f"Telegram publish failed for track "
                     f"{track['track_id']}: {error_details}"
