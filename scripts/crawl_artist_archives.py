@@ -2,7 +2,7 @@ import argparse
 import asyncio
 import json
 import os
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import aiohttp
 import aiosqlite
