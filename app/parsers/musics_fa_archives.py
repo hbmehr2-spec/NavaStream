@@ -10,8 +10,32 @@ ALBUM_EN_RE = re.compile(
 )
 
 
+NON_ARTIST_ARCHIVE_NAMES = {
+    "هوش مصنوعی",
+    "ترکی",
+    "کردی",
+    "موسیقی ترکی",
+    "آهنگ ترکی",
+    "آهنگ های ترکی",
+    "موسیقی کردی",
+    "آهنگ کردی",
+    "آهنگ های کردی",
+    "artificial intelligence",
+    "ai music",
+    "turkish",
+    "turkish music",
+    "kurdish",
+    "kurdish music",
+}
+
+
+def _is_non_artist_archive_name(name):
+    normalized = re.sub(r"\\s+", " ", (name or "").strip().lower())
+    return normalized in NON_ARTIST_ARCHIVE_NAMES
+
+
 def extract_artist_links(html, page_url):
-    """Return real /artists/ archive links found on a Musics-fa page."""
+    """Return person/group archive links, excluding category and pagination URLs."""
     soup = BeautifulSoup(html, "html.parser")
     found = {}
     for link in soup.select("a[href]"):
@@ -21,10 +45,13 @@ def extract_artist_links(html, page_url):
             continue
         if not parsed.path.startswith("/artists/"):
             continue
-        canonical_path = parsed.path.rstrip("/") + "/"
+        path_parts = [part for part in parsed.path.strip("/").split("/") if part]
+        if len(path_parts) != 2:
+            continue
+        canonical_path = f"/artists/{path_parts[1]}/"
         canonical_url = f"https://musics-fa.com{canonical_path}"
         name = link.get_text(" ", strip=True)
-        if name:
+        if name and not _is_non_artist_archive_name(name):
             found.setdefault(canonical_url, name)
     return [{"name": name, "source_url": url} for url, name in found.items()]
 
@@ -84,7 +111,7 @@ def parse_artist_archive(html, page_url):
         soup.title.get_text(" ", strip=True) if soup.title else ""
     )
     title = re.sub(
-        r"^(?:دانلود\s*)?(?:تمام\s*)?آهنگ(?:های| های)?\s*",
+        r"^(?:دانلود\s*)?(?:تمام\s*)?(?:آهنگ(?:های| های)?|نوحه(?:های| های)?|مداحی(?:های| های)?)\s*",
         "",
         title,
     )
