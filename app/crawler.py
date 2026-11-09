@@ -19,7 +19,6 @@ USER_AGENT = (
 async def get_enabled_sources():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-
         cursor = await db.execute(
             """
             SELECT id, name, url
@@ -28,7 +27,6 @@ async def get_enabled_sources():
             ORDER BY id
             """
         )
-
         return [dict(row) for row in await cursor.fetchall()]
 
 
@@ -41,7 +39,6 @@ async def fetch_page(session, url):
         ) as response:
             response.raise_for_status()
             return await response.text(errors="replace")
-
     except (aiohttp.ClientError, asyncio.TimeoutError) as error:
         print(f"Fetch failed: {url} | {error}")
         return None
@@ -49,29 +46,17 @@ async def fetch_page(session, url):
 
 def extract_page_info(html, page_url):
     soup = BeautifulSoup(html, "html.parser")
-
     title = soup.title.get_text(" ", strip=True) if soup.title else None
-
-    description_tag = soup.find(
-        "meta",
-        attrs={"name": "description"}
-    )
-
+    description_tag = soup.find("meta", attrs={"name": "description"})
     description = (
         description_tag.get("content", "").strip()
         if description_tag else None
     )
-
     canonical_tag = soup.find(
         "link",
         rel=lambda value: value and "canonical" in value
     )
-
-    canonical_url = (
-        canonical_tag.get("href")
-        if canonical_tag else page_url
-    )
-
+    canonical_url = canonical_tag.get("href") if canonical_tag else page_url
     return {
         "title": title,
         "description": description,
@@ -96,10 +81,7 @@ async def get_tracks_needing_review(source_id):
 
 
 async def enrich_tracks_from_details(session, source_id, tracks):
-    # Include unresolved older records even when they are no longer on
-    # the source homepage, so their detail pages can be checked again.
     candidates = {}
-
     for track in tracks:
         source_url = track.get("source_url")
         if source_url:
@@ -118,7 +100,6 @@ async def enrich_tracks_from_details(session, source_id, tracks):
     async def fetch_and_parse(source_url, fallback):
         async with semaphore:
             detail_html = await fetch_page(session, source_url)
-
         if detail_html is None:
             return fallback
 
@@ -127,9 +108,6 @@ async def enrich_tracks_from_details(session, source_id, tracks):
             return fallback
 
         merged = dict(fallback)
-
-        # Prefer values read from the detail page, but retain useful
-        # listing-page values when a detail field is absent.
         for key in (
             "external_id",
             "artist",
@@ -139,6 +117,14 @@ async def enrich_tracks_from_details(session, source_id, tracks):
             "artwork_url",
             "audio_url",
             "fingerprint",
+            "source_categories_json",
+            "mood_tags_json",
+            "genre_tags_json",
+            "language_tags_json",
+            "region_tags_json",
+            "version_type",
+            "artist_source",
+            "artist_confidence",
         ):
             if detail.get(key) is not None:
                 merged[key] = detail[key]
@@ -149,38 +135,25 @@ async def enrich_tracks_from_details(session, source_id, tracks):
 
     urls = list(candidates)
     results = await asyncio.gather(
-        *(
-            fetch_and_parse(url, candidates[url])
-            for url in urls
-        ),
+        *(fetch_and_parse(url, candidates[url]) for url in urls),
         return_exceptions=True
     )
 
     enriched = []
     detail_successes = 0
-
     for url, result in zip(urls, results):
         if isinstance(result, Exception):
             print(f"Detail parse failed: {url} | {result}")
             fallback = candidates[url]
-            # Do not insert skeletal records that came only from the
-            # unresolved-record lookup if the detail page could not load.
             if fallback.get("artist") or fallback.get("title"):
                 enriched.append(fallback)
             continue
 
-        if (
-            result.get("artist")
-            or result.get("title")
-            or result.get("audio_url")
-        ):
+        if result.get("artist") or result.get("title") or result.get("audio_url"):
             enriched.append(result)
             if result.get("validation_note", "").startswith(
-                "Audio filename matches"
-            ) or result.get("validation_note", "").startswith(
-                "Audio filename does not match"
-            ) or result.get("validation_note", "").startswith(
-                "Artist/title metadata"
+                ("Audio filename matches", "Audio filename does not match",
+                 "Artist/title metadata", "Artist is a candidate")
             ):
                 detail_successes += 1
 
@@ -200,7 +173,6 @@ async def save_tracks(source_id, tracks):
 
         for track in tracks:
             existing = None
-
             external_id = track.get("external_id")
             fingerprint = track.get("fingerprint")
 
@@ -240,10 +212,17 @@ async def save_tracks(source_id, tracks):
                 track.get("audio_url"),
                 track.get("validation_status", "needs_review"),
                 track.get("validation_note"),
+                track.get("source_categories_json", "[]"),
+                track.get("mood_tags_json", "[]"),
+                track.get("genre_tags_json", "[]"),
+                track.get("language_tags_json", "[]"),
+                track.get("region_tags_json", "[]"),
+                track.get("version_type"),
+                track.get("artist_source"),
+                track.get("artist_confidence"),
             )
 
             if existing:
-                # Never let an incomplete crawl downgrade a previously matched record.
                 incoming_status = track.get(
                     "validation_status", "needs_review"
                 )
@@ -264,7 +243,15 @@ async def save_tracks(source_id, tracks):
                             external_id = ?,
                             audio_url = ?,
                             validation_status = ?,
-                            validation_note = ?
+                            validation_note = ?,
+                            source_categories_json = ?,
+                            mood_tags_json = ?,
+                            genre_tags_json = ?,
+                            language_tags_json = ?,
+                            region_tags_json = ?,
+                            version_type = ?,
+                            artist_source = ?,
+                            artist_confidence = ?
                         WHERE id = ?
                         """,
                         (*values, existing[0])
@@ -277,16 +264,18 @@ async def save_tracks(source_id, tracks):
                     INSERT INTO tracks (
                         artist, title, release_date, source_id, source_url,
                         artwork_url, fingerprint, external_id, audio_url,
-                        validation_status, validation_note, rights_status
+                        validation_status, validation_note,
+                        source_categories_json, mood_tags_json, genre_tags_json,
+                        language_tags_json, region_tags_json, version_type,
+                        artist_source, artist_confidence, rights_status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown')
                     """,
                     values
                 )
                 track_id = cursor.lastrowid
                 inserted += 1
 
-            # Preserve any existing queue status, attempts and error history.
             await db.execute(
                 """
                 INSERT OR IGNORE INTO processing_queue (track_id)
@@ -327,17 +316,12 @@ async def save_tracks(source_id, tracks):
 
 async def crawl_source(session, source):
     print(f"Checking: {source['name']}")
-
     html = await fetch_page(session, source["url"])
-
     if html is None:
         return None
 
     hostname = (urlparse(source["url"]).hostname or "").lower()
-
     if hostname == "musics-fa.com" or hostname.endswith(".musics-fa.com"):
-        # The homepage contains only one page of songs (about 20).
-        # Walk recent archive pages so a single crawl can build a useful catalog.
         target_limit = max(1, int(os.getenv("NAVASTREAM_CRAWL_LIMIT", "1000")))
         max_listing_pages = min(100, max(10, (target_limit // 10) + 5))
         listing_tracks = []
@@ -377,14 +361,11 @@ async def crawl_source(session, source):
             if len(listing_tracks) >= target_limit:
                 print(f"Musics-fa crawl target reached: {target_limit}")
                 break
-
             if added_on_page == 0:
                 break
 
         tracks = await enrich_tracks_from_details(
-            session,
-            source["id"],
-            listing_tracks,
+            session, source["id"], listing_tracks
         )
         inserted, updated = await save_tracks(source["id"], tracks)
 
@@ -403,13 +384,11 @@ async def crawl_source(session, source):
             1 for item in tracks
             if item.get("validation_status") != "matched"
         )
-
         print(
             f"Musics-fa: found {len(listing_tracks)} listing tracks, "
             f"processed {len(tracks)} detail records, "
             f"new {inserted}, updated {updated}, review {review_count}"
         )
-
         return {
             "source_id": source["id"],
             "source_name": source["name"],
@@ -419,7 +398,6 @@ async def crawl_source(session, source):
         }
 
     page_info = extract_page_info(html, source["url"])
-
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
@@ -432,7 +410,6 @@ async def crawl_source(session, source):
         await db.commit()
 
     print(f"Found page: {page_info['title']}")
-
     return {
         "source_id": source["id"],
         "source_name": source["name"],
@@ -442,44 +419,19 @@ async def crawl_source(session, source):
 
 async def crawl_all_sources():
     sources = await get_enabled_sources()
-
     if not sources:
         print("No enabled sources found.")
         return []
 
-    connector = aiohttp.TCPConnector(
-        limit=5,
-        ssl=False
-    )
+    connector = aiohttp.TCPConnector(limit=5, ssl=False)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        tasks = [crawl_source(session, source) for source in sources]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Use the site's default response; its custom-UA variant omits artist metadata.
-    async with aiohttp.ClientSession(
-        connector=connector
-    ) as session:
-
-        tasks = [
-            crawl_source(session, source)
-            for source in sources
-        ]
-
-        results = await asyncio.gather(
-            *tasks,
-            return_exceptions=True
-        )
-
-    successful = [
-        result for result in results
-        if isinstance(result, dict)
-    ]
-
-    failures = [
-        result for result in results
-        if isinstance(result, Exception)
-    ]
-
+    successful = [result for result in results if isinstance(result, dict)]
+    failures = [result for result in results if isinstance(result, Exception)]
     for error in failures:
         print(f"Crawl task failed: {error}")
 
     print(f"Crawl completed: {len(successful)}/{len(sources)}")
-
     return successful
