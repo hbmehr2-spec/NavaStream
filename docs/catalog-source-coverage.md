@@ -16,6 +16,7 @@
   - `GET /v1/artists`
   - `GET /v1/artists/{id}`
 - Artist pages are crawled separately from the general newest-tracks pagination. The manual catalog workflow accepts a maximum artist count and imports the track catalog before artist relationships.
+- Track listing API supports an optional `scope=iranian|foreign|uncertain` filter; the default returns all scope classes and does not silently hide unverified records.
 
 ## Deliberate limits
 
