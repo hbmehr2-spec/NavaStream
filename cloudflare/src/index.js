@@ -493,7 +493,7 @@ export default {
         ).bind(Number(artistMatch[1])).first();
         if (!artist) return json({ error: "Artist not found." }, 404);
         const tracks = await env.DB.prepare(
-          "SELECT t.id, t.title, t.artist, t.audio_url, t.artwork_url, t.published_at, t.source_categories_json, t.mood_tags_json, t.genre_tags_json, t.language_tags_json, t.region_tags_json, t.trend_tags_json, t.version_type, t.artist_source, t.artist_confidence FROM catalog_track_artists ta JOIN catalog_tracks t ON t.id = ta.track_id WHERE ta.artist_id = ? AND t.audio_url LIKE 'https://%' AND t.validation_status != 'excluded' ORDER BY t.id DESC"
+          "SELECT t.id, t.title, t.artist, t.audio_url, t.artwork_url, t.published_at, t.source_categories_json, t.mood_tags_json, t.genre_tags_json, t.language_tags_json, t.region_tags_json, t.trend_tags_json, t.version_type, t.artist_source, t.artist_confidence, t.catalog_scope, t.scope_confidence, t.scope_evidence FROM catalog_track_artists ta JOIN catalog_tracks t ON t.id = ta.track_id WHERE ta.artist_id = ? AND t.audio_url LIKE 'https://%' AND t.validation_status != 'excluded' ORDER BY t.id DESC"
         ).bind(artist.id).all();
         return json({
           id: String(artist.id), name: artist.name, sourceUrl: artist.source_url,
@@ -556,11 +556,11 @@ export default {
         let statement;
         if (query) {
           statement = env.DB.prepare(
-            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' AND (title LIKE ? OR artist LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?"
+            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence, catalog_scope, scope_confidence, scope_evidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' AND (title LIKE ? OR artist LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?"
           ).bind(`%${query}%`, `%${query}%`, limit + 1, offset);
         } else {
           statement = env.DB.prepare(
-            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' ORDER BY id DESC LIMIT ? OFFSET ?"
+            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence, catalog_scope, scope_confidence, scope_evidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' ORDER BY id DESC LIMIT ? OFFSET ?"
           ).bind(limit + 1, offset);
         }
 
@@ -577,7 +577,7 @@ export default {
       const match = path.match(/^\/v1\/tracks\/(\d+)$/);
       if (match) {
         const row = await env.DB.prepare(
-          "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence FROM catalog_tracks WHERE id = ? AND audio_url LIKE 'https://%' AND validation_status != 'excluded' LIMIT 1"
+          "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence, catalog_scope, scope_confidence, scope_evidence FROM catalog_tracks WHERE id = ? AND audio_url LIKE 'https://%' AND validation_status != 'excluded' LIMIT 1"
         ).bind(Number(match[1])).first();
 
         if (!row) return json({ error: "Track not found." }, 404);
