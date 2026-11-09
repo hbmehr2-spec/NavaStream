@@ -43,6 +43,9 @@ function trackPayload(row) {
     versionType: row.version_type || null,
     artistSource: row.artist_source || null,
     artistConfidence: row.artist_confidence || null,
+    catalogScope: row.catalog_scope || "uncertain",
+    scopeConfidence: row.scope_confidence || "low",
+    scopeEvidence: row.scope_evidence || "no_verified_origin_evidence",
   };
 }
 
@@ -126,12 +129,17 @@ function validateCatalogTrack(track) {
     ["version_type", 50],
     ["artist_source", 50],
     ["artist_confidence", 20],
+    ["catalog_scope", 20],
+    ["scope_confidence", 20],
+    ["scope_evidence", 100],
   ]) {
     const value = track[field];
     if (value !== null && value !== undefined &&
         (typeof value !== "string" || value.length > maxLength)) return false;
   }
 
+  if (!["iranian", "foreign", "uncertain"].includes(track.catalog_scope || "uncertain")) return false;
+  if (!["high", "medium", "low"].includes(track.scope_confidence || "low")) return false;
   return ["matched", "mismatch", "needs_review", "excluded"].includes(
     track.validation_status || "needs_review"
   );
@@ -199,7 +207,7 @@ export default {
       try {
         const statements = payload.tracks.map((track) =>
           env.DB.prepare(
-            "INSERT INTO catalog_tracks (title, artist, audio_url, artwork_url, source_url, external_id, release_date, validation_status, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_url) DO UPDATE SET title = excluded.title, artist = excluded.artist, audio_url = excluded.audio_url, artwork_url = excluded.artwork_url, external_id = excluded.external_id, release_date = excluded.release_date, validation_status = excluded.validation_status, source_categories_json = excluded.source_categories_json, mood_tags_json = excluded.mood_tags_json, genre_tags_json = excluded.genre_tags_json, language_tags_json = excluded.language_tags_json, region_tags_json = excluded.region_tags_json, trend_tags_json = excluded.trend_tags_json, version_type = excluded.version_type, artist_source = excluded.artist_source, artist_confidence = excluded.artist_confidence"
+            "INSERT INTO catalog_tracks (title, artist, audio_url, artwork_url, source_url, external_id, release_date, validation_status, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence, catalog_scope, scope_confidence, scope_evidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_url) DO UPDATE SET title = excluded.title, artist = excluded.artist, audio_url = excluded.audio_url, artwork_url = excluded.artwork_url, external_id = excluded.external_id, release_date = excluded.release_date, validation_status = excluded.validation_status, source_categories_json = excluded.source_categories_json, mood_tags_json = excluded.mood_tags_json, genre_tags_json = excluded.genre_tags_json, language_tags_json = excluded.language_tags_json, region_tags_json = excluded.region_tags_json, trend_tags_json = excluded.trend_tags_json, version_type = excluded.version_type, artist_source = excluded.artist_source, artist_confidence = excluded.artist_confidence, catalog_scope = excluded.catalog_scope, scope_confidence = excluded.scope_confidence, scope_evidence = excluded.scope_evidence"
           ).bind(
             track.title.trim(),
             track.artist || null,
@@ -218,6 +226,9 @@ export default {
             track.version_type || null,
             track.artist_source || null,
             track.artist_confidence || null,
+            track.catalog_scope || "uncertain",
+            track.scope_confidence || "low",
+            track.scope_evidence || "no_verified_origin_evidence",
           )
         );
 
@@ -273,8 +284,8 @@ export default {
         let linkedTracks = 0;
         for (const artist of payload.artists) {
           await env.DB.prepare(
-            "INSERT INTO catalog_artists (name, source_url, description, artwork_url, last_crawled_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(source_url) DO UPDATE SET name = excluded.name, description = COALESCE(excluded.description, catalog_artists.description), artwork_url = COALESCE(excluded.artwork_url, catalog_artists.artwork_url), last_crawled_at = CURRENT_TIMESTAMP"
-          ).bind(artist.name.trim(), artist.source_url, artist.description || null, artist.artwork_url || null).run();
+            "INSERT INTO catalog_artists (name, source_url, description, artwork_url, catalog_scope, scope_confidence, scope_evidence, last_crawled_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(source_url) DO UPDATE SET name = excluded.name, description = COALESCE(excluded.description, catalog_artists.description), artwork_url = COALESCE(excluded.artwork_url, catalog_artists.artwork_url), catalog_scope = excluded.catalog_scope, scope_confidence = excluded.scope_confidence, scope_evidence = excluded.scope_evidence, last_crawled_at = CURRENT_TIMESTAMP"
+          ).bind(artist.name.trim(), artist.source_url, artist.description || null, artist.artwork_url || null, artist.catalog_scope || "uncertain", artist.scope_confidence || "low", artist.scope_evidence || "no_verified_origin_evidence").run();
           const saved = await env.DB.prepare(
             "SELECT id FROM catalog_artists WHERE source_url = ? LIMIT 1"
           ).bind(artist.source_url).first();
@@ -457,7 +468,7 @@ export default {
         const limit = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "30", 10) || 30));
         const offset = Math.max(0, Number.parseInt(url.searchParams.get("cursor") || "0", 10) || 0);
         const statement = query
-          ? env.DB.prepare("SELECT a.id, a.name, a.source_url, a.description, a.artwork_url, COUNT(ta.track_id) AS track_count FROM catalog_artists a LEFT JOIN catalog_track_artists ta ON ta.artist_id = a.id WHERE a.name LIKE ? GROUP BY a.id ORDER BY a.name COLLATE NOCASE LIMIT ? OFFSET ?").bind(`%${query}%`, limit + 1, offset)
+          ? env.DB.prepare("SELECT a.id, a.name, a.source_url, a.description, a.artwork_url, a.catalog_scope, a.scope_confidence, a.scope_evidence, COUNT(ta.track_id) AS track_count FROM catalog_artists a LEFT JOIN catalog_track_artists ta ON ta.artist_id = a.id WHERE a.name LIKE ? GROUP BY a.id ORDER BY a.name COLLATE NOCASE LIMIT ? OFFSET ?").bind(`%${query}%`, limit + 1, offset)
           : env.DB.prepare("SELECT a.id, a.name, a.source_url, a.description, a.artwork_url, COUNT(ta.track_id) AS track_count FROM catalog_artists a LEFT JOIN catalog_track_artists ta ON ta.artist_id = a.id GROUP BY a.id ORDER BY a.name COLLATE NOCASE LIMIT ? OFFSET ?").bind(limit + 1, offset);
         const result = await statement.all();
         const rows = result.results || [];
@@ -466,6 +477,9 @@ export default {
           items: rows.slice(0, limit).map((row) => ({
             id: String(row.id), name: row.name, sourceUrl: row.source_url,
             description: row.description, artworkUrl: row.artwork_url,
+            catalogScope: row.catalog_scope || "uncertain",
+            scopeConfidence: row.scope_confidence || "low",
+            scopeEvidence: row.scope_evidence || "no_verified_origin_evidence",
             trackCount: row.track_count || 0,
           })),
           nextCursor: hasMore ? String(offset + limit) : null,
@@ -475,7 +489,7 @@ export default {
       const artistMatch = path.match(/^\/v1\/artists\/(\d+)$/);
       if (artistMatch) {
         const artist = await env.DB.prepare(
-          "SELECT id, name, source_url, description, artwork_url FROM catalog_artists WHERE id = ? LIMIT 1"
+          "SELECT id, name, source_url, description, artwork_url, catalog_scope, scope_confidence, scope_evidence FROM catalog_artists WHERE id = ? LIMIT 1"
         ).bind(Number(artistMatch[1])).first();
         if (!artist) return json({ error: "Artist not found." }, 404);
         const tracks = await env.DB.prepare(
@@ -484,6 +498,9 @@ export default {
         return json({
           id: String(artist.id), name: artist.name, sourceUrl: artist.source_url,
           description: artist.description, artworkUrl: artist.artwork_url,
+          catalogScope: artist.catalog_scope || "uncertain",
+          scopeConfidence: artist.scope_confidence || "low",
+          scopeEvidence: artist.scope_evidence || "no_verified_origin_evidence",
           tracks: (tracks.results || []).map(trackPayload),
         });
       }
