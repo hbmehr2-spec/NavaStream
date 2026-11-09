@@ -31,3 +31,14 @@
 - `NAVASTREAM_ARTIST_LIMIT` / `--limit`: maximum number of artist archive pages discovered from the homepage.
 - `NAVASTREAM_ARTIST_PAGE_LIMIT` / `--page-limit`: maximum pages per artist archive.
 - The crawler deduplicates artist pages by canonical URL and song cards by source URL.
+
+## Manual review export
+
+After crawling tracks and artist archives into the local SQLite database, run:
+
+```bash
+PYTHONPATH=. python scripts/catalog_review_report.py
+```
+
+The command creates timestamped CSV files for tracks and artists that still need review, plus a JSON summary, under `reports/catalog-review/`. Use `--output-dir` to choose another destination. The database is opened read-only; this report does not change local records, call the API, upload data, or infer Iranian origin. Track candidates include uncertain origin, missing/low-confidence artist identity, and audio-metadata mismatches. Artist rows are included when their origin scope is uncertain.
+
