@@ -354,32 +354,69 @@ def _extract_track_identity(article, audio_url):
 
     persian_match = None
     english_match = None
+    lead_title = None
 
     for paragraph in paragraphs:
         if not paragraph:
             continue
+        if lead_title is None and re.match(
+            r"^دانلود\\s*(?:آهنگ|اهنگ)\\s*", paragraph, re.IGNORECASE
+        ):
+            candidate = _clean_identity_field(
+                re.sub(
+                    r"^دانلود\\s*(?:آهنگ|اهنگ)\\s*(?:جدید\\s*)?",
+                    "",
+                    paragraph,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if candidate:
+                lead_title = candidate
         if persian_match is None:
             persian_match = PERSIAN_TRACK_RE.search(paragraph)
         if english_match is None:
             english_match = ENGLISH_TRACK_RE.search(paragraph)
-        if persian_match and english_match:
+        if persian_match and english_match and lead_title:
             break
 
     explicit_artist = (
         _clean_identity_field(persian_match.group("artist")) if persian_match else None
     )
-    title = _clean_identity_field(persian_match.group("title")) if persian_match else None
+    persian_match_title = (
+        _clean_identity_field(persian_match.group("title")) if persian_match else None
+    )
     english_artist = _clean_identity_field(english_match.group("artist")) if english_match else None
     english_title = _clean_identity_field(english_match.group("title")) if english_match else None
     data_artist = _clean_identity_field(article.get("data-artist"), max_length=120)
 
-    if not title:
-        title = english_title
+    if lead_title and explicit_artist:
+        lead_title = re.sub(
+            rf"^{re.escape(explicit_artist)}\\s+|\\s+{re.escape(explicit_artist)}$",
+            "",
+            lead_title,
+            flags=re.IGNORECASE,
+        ).strip(" \\t-–—|،,؛;:.!؟") or None
 
-    artist = data_artist or explicit_artist or english_artist
+    if lead_title and english_title:
+        if _normalise_filename(english_title) in _normalise_filename(lead_title):
+            title = english_title
+        else:
+            title = lead_title
+    else:
+        title = lead_title or persian_match_title or english_title
+
+    data_artist_is_ambiguous = bool(
+        data_artist
+        and lead_title
+        and _normalise_fa(data_artist) == _normalise_fa(lead_title)
+    )
+    artist = explicit_artist or english_artist or (
+        data_artist if not data_artist_is_ambiguous else None
+    )
     artist_source = (
-        "detail_text" if data_artist or explicit_artist else
-        "english_metadata" if english_artist else None
+        "detail_text" if explicit_artist else
+        "english_metadata" if english_artist else
+        "detail_text" if artist else None
     )
     artist_confidence = "high" if artist and not _is_generic_artist(artist) else None
 
