@@ -56,6 +56,16 @@ def extract_artist_links(html, page_url):
     return [{"name": name, "source_url": url} for url, name in found.items()]
 
 
+
+def extract_artist_links_from_track_page(html, page_url):
+    """Extract artist archive links only from the song article, not page navigation."""
+    soup = BeautifulSoup(html, "html.parser")
+    article = soup.select_one("article.mf_pst")
+    if not article:
+        return []
+    return extract_artist_links(str(article), page_url)
+
+
 def _is_album_article(article):
     text = article.get_text(" ", strip=True)
     return bool(
