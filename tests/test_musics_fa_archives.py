@@ -151,6 +151,41 @@ class MusicsFaArchiveParserTests(unittest.TestCase):
             }],
         )
 
+    def test_matches_exact_artist_name_in_global_singer_list(self):
+        html = """
+        <html>
+          <body>
+            <nav><a href="/artists/navigation-link/">Navigation</a></nav>
+            <div class="singer-list">
+              <a href="/artists/novan/">نوان</a>
+              <a href="/artists/other/">خواننده دیگر</a>
+            </div>
+          </body>
+        </html>
+        """
+        self.assertEqual(
+            extract_artist_links_from_track_page(
+                html,
+                "https://musics-fa.com/download-song/123/",
+                expected_artist="نوان",
+            ),
+            [{
+                "name": "نوان",
+                "source_url": "https://musics-fa.com/artists/novan/",
+            }],
+        )
+
+    def test_does_not_match_different_singer_list_artist(self):
+        html = '<a href="/artists/novan/">نوان</a>'
+        self.assertEqual(
+            extract_artist_links_from_track_page(
+                html,
+                "https://musics-fa.com/download-song/123/",
+                expected_artist="پارسا چیلیک",
+            ),
+            [],
+        )
+
     def test_track_page_without_explicit_archive_link_has_no_artist_links(self):
         html = '<a href="/artists/navigation-link/">Navigation</a>'
         self.assertEqual(
