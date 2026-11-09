@@ -83,6 +83,7 @@ async def init_db():
         await _ensure_column(db, "tracks", "genre_tags_json", "TEXT")
         await _ensure_column(db, "tracks", "language_tags_json", "TEXT")
         await _ensure_column(db, "tracks", "region_tags_json", "TEXT")
+        await _ensure_column(db, "tracks", "trend_tags_json", "TEXT")
         await _ensure_column(db, "tracks", "version_type", "TEXT")
         await _ensure_column(db, "tracks", "artist_source", "TEXT")
         await _ensure_column(db, "tracks", "artist_confidence", "TEXT")
