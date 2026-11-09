@@ -196,7 +196,9 @@ async def discover_artist_links_from_track_pages(session, limit):
     return list(discovered.values())
 
 
-async def crawl_artist_archives(limit=250, page_limit=20, discover_track_pages=0):
+async def crawl_artist_archives(
+    limit=250, page_limit=20, discover_track_pages=0, discover_only=False
+):
     await init_db()
     await ensure_artist_tables()
     connector = aiohttp.TCPConnector(limit=5, ssl=False)
@@ -210,23 +212,24 @@ async def crawl_artist_archives(limit=250, page_limit=20, discover_track_pages=0
         if not homepage:
             raise RuntimeError("Could not fetch Musics-fa homepage.")
 
-        artists = extract_artist_links(homepage, "https://musics-fa.com/")
-        homepage_count = len(artists)
-
+        homepage_artists = extract_artist_links(homepage, "https://musics-fa.com/")
         discovered = await discover_artist_links_from_track_pages(
             session, discover_track_pages
         )
-        known_urls = {artist["source_url"] for artist in artists}
-        for artist in discovered:
-            if artist["source_url"] not in known_urls:
-                artists.append(artist)
-                known_urls.add(artist["source_url"])
 
+        # Discovery mode is deliberately isolated from the regular homepage crawl.
+        # This keeps a five-page test small and prevents unrelated catalog updates.
+        artists = discovered if discover_track_pages else homepage_artists
         print(
-            f"Artist archives: {homepage_count} from homepage, "
-            f"{len(discovered)} discovered from {discover_track_pages} song page(s), "
-            f"{len(artists)} unique before limit"
+            f"Artist archives: {len(homepage_artists)} on homepage; "
+            f"{len(discovered)} found in {discover_track_pages} unlinked song page(s)"
         )
+
+        if discover_only:
+            for artist in discovered:
+                print(f"DISCOVERED: {artist['name']} -> {artist['source_url']}")
+            return {"discovered": len(discovered), "archives_crawled": 0}
+
         artists = artists[:limit]
 
         totals = {"artists": 0, "albums": 0, "tracks_seen": 0, "tracks_inserted": 0, "tracks_updated": 0}
@@ -313,7 +316,12 @@ def main():
         "--discover-track-pages",
         type=int,
         default=0,
-        help="Also inspect this many distinct unlinked artist song pages for archive links.",
+        help="Inspect this many distinct unlinked song pages for artist archive links.",
+    )
+    parser.add_argument(
+        "--discover-only",
+        action="store_true",
+        help="Print discovered archive links without crawling or saving them.",
     )
     args = parser.parse_args()
     if not 1 <= args.limit <= 2000:
@@ -324,7 +332,10 @@ def main():
         raise ValueError("--discover-track-pages must be between 0 and 5000")
     asyncio.run(
         crawl_artist_archives(
-            args.limit, args.page_limit, args.discover_track_pages
+            args.limit,
+            args.page_limit,
+            args.discover_track_pages,
+            args.discover_only,
         )
     )
 
