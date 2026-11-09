@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from app.parsers.musics_fa import parse_track_detail, parse_tracks
+from app.parsers.musics_fa import classify_catalog_scope, parse_track_detail, parse_tracks
 
 
 class MusicsFaParserTests(unittest.TestCase):
@@ -208,6 +208,23 @@ class MusicsFaParserTests(unittest.TestCase):
         tracks = parse_tracks(html)
         self.assertEqual(tracks[0]["validation_status"], "needs_review")
 
+
+
+    def test_known_foreign_artist_requires_exact_curated_match(self):
+        self.assertEqual(
+            classify_catalog_scope("Glass Animals"),
+            {
+                "catalog_scope": "foreign",
+                "scope_confidence": "high",
+                "scope_evidence": "curated_exact_foreign_artist_match",
+            },
+        )
+
+    def test_unknown_artist_is_not_assumed_to_be_iranian(self):
+        result = classify_catalog_scope("یک خواننده ناشناخته")
+        self.assertEqual(result["catalog_scope"], "uncertain")
+        self.assertEqual(result["scope_confidence"], "low")
+        self.assertEqual(result["scope_evidence"], "no_verified_origin_evidence")
 
 if __name__ == "__main__":
     unittest.main()
