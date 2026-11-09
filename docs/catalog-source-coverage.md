@@ -42,3 +42,8 @@ PYTHONPATH=. python scripts/catalog_review_report.py
 
 The command creates timestamped CSV files for tracks and artists that still need review, plus a JSON summary, under `reports/catalog-review/`. Use `--output-dir` to choose another destination. The database is opened read-only; this report does not change local records, call the API, upload data, or infer Iranian origin. Track candidates include uncertain origin, missing/low-confidence artist identity, and audio-metadata mismatches. Artist rows are included when their origin scope is uncertain.
 
+
+
+## Relationship integrity audit
+
+The read-only catalog review report also exports tracks with no normalized artist relation, artist entities with no linked catalog track, and album entities with no linked artist. These are audit candidates only. An absent relation is not proof of bad source data; collaborations and incomplete crawls can explain it. The report never creates or deletes relationships. The JSON summary includes counts for each category.
