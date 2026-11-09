@@ -7,6 +7,9 @@ from scripts.catalog_review_report import (
     fetch_artist_rows,
     fetch_track_rows,
     generate_report,
+    fetch_unlinked_track_rows,
+    fetch_orphan_artist_rows,
+    fetch_orphan_album_rows,
     is_track_review_candidate,
 )
 
@@ -75,6 +78,8 @@ class CatalogReviewReportTests(unittest.TestCase):
                 INSERT INTO catalog_artists VALUES (
                     1, 'Singer', 'https://example.com/singer', 'uncertain'
                 );
+                CREATE TABLE catalog_track_artists (track_id INTEGER, artist_id INTEGER);
+                CREATE TABLE catalog_artist_albums (artist_id INTEGER, album_id INTEGER);
                 CREATE TABLE catalog_albums (
                     id INTEGER PRIMARY KEY, name TEXT
                 );
@@ -85,12 +90,15 @@ class CatalogReviewReportTests(unittest.TestCase):
 
             summary, paths = generate_report(database, output)
 
-            self.assertEqual(len(paths), 3)
+            self.assertEqual(len(paths), 6)
             self.assertTrue(all(path.exists() for path in paths))
             self.assertEqual(summary["track_total"], 1)
             self.assertEqual(summary["track_review_candidates"], 1)
             self.assertEqual(summary["artist_review_candidates"], 1)
             self.assertEqual(summary["album_total"], 1)
+            self.assertEqual(summary["tracks_without_artist_link"], 1)
+            self.assertEqual(summary["artists_without_track_link"], 1)
+            self.assertEqual(summary["albums_without_artist_link"], 1)
             check = sqlite3.connect(database)
             self.assertEqual(check.execute("SELECT COUNT(*) FROM tracks").fetchone()[0], 1)
             check.close()
