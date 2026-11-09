@@ -30,7 +30,7 @@ NON_ARTIST_ARCHIVE_NAMES = {
 
 
 def _is_non_artist_archive_name(name):
-    normalized = re.sub(r"\\s+", " ", (name or "").strip().lower())
+    normalized = re.sub(r"\s+", " ", (name or "").strip().lower())
     return normalized in NON_ARTIST_ARCHIVE_NAMES
 
 
