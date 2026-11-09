@@ -4,6 +4,12 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 
+ALBUM_EN_RE = re.compile(
+    r"Download\\s+(?:New\\s+)?Album\\s+BY\\s*:\\s*(?P<artist>[^|]+?)\\s*\\|\\s*(?P<album>.+?)(?=\\s+With\\s+(?:Text|Lyrics)\\b|\\s+And\\s+\\d+\\s+Quality\\b|\\s+On\\s+Music-fa\\b|$)",
+    re.IGNORECASE,
+)
+
+
 def extract_artist_links(html, page_url):
     """Return real /artists/ archive links found on a Musics-fa page."""
     soup = BeautifulSoup(html, "html.parser")
@@ -23,8 +29,53 @@ def extract_artist_links(html, page_url):
     return [{"name": name, "source_url": url} for url, name in found.items()]
 
 
+def _is_album_article(article):
+    text = article.get_text(" ", strip=True)
+    return bool(
+        re.search(r"دانلود\\s*آلبوم|Download\\s+(?:New\\s+)?Album\\s+BY", text, re.IGNORECASE)
+    )
+
+
+def _parse_album_article(article, page_url, artist_name):
+    heading = article.select_one("header h2 a, header h1 a, h2 a, h1 a")
+    if not heading:
+        return None
+    source_url = urljoin(page_url, heading.get("href", ""))
+    heading_text = heading.get_text(" ", strip=True)
+    paragraphs = " ".join(
+        item.get_text(" ", strip=True) for item in article.select("p")
+    )
+    combined = " ".join((heading_text, paragraphs, article.get_text(" ", strip=True)))
+    english = ALBUM_EN_RE.search(combined)
+    album_name = english.group("album").strip() if english else None
+    artist_candidate = english.group("artist").strip() if english else artist_name
+    if not album_name:
+        album_name = re.sub(r"^دانلود\\s*آلبوم(?:\\s*جدید)?\\s*", "", heading_text, flags=re.IGNORECASE)
+        if artist_name and album_name.startswith(artist_name):
+            album_name = album_name[len(artist_name):].strip(" -–—")
+    album_name = re.sub(r"\\s+", " ", album_name or "").strip(" -–—|")
+    if not album_name or not source_url:
+        return None
+
+    date_tag = article.select_one("header div span")
+    release_date = date_tag.get_text(" ", strip=True) if date_tag else None
+    image = article.select_one("img")
+    artwork_url = None
+    if image:
+        image_src = image.get("data-src") or image.get("data-lazy-src") or image.get("src")
+        if image_src:
+            artwork_url = urljoin(page_url, image_src)
+    return {
+        "name": album_name,
+        "artist_name": artist_candidate or artist_name,
+        "source_url": source_url,
+        "release_date": release_date,
+        "artwork_url": artwork_url,
+    }
+
+
 def parse_artist_archive(html, page_url):
-    """Extract artist identity and track links from a verified artist archive."""
+    """Extract artist identity, album cards, and song links from an artist archive."""
     from app.parsers.musics_fa import parse_tracks
 
     soup = BeautifulSoup(html, "html.parser")
@@ -60,14 +111,22 @@ def parse_artist_archive(html, page_url):
         if image_src:
             artwork_url = urljoin(page_url, image_src)
 
-    tracks = parse_tracks(html, page_url)
-    next_links = []
+    albums = []
+    for article in soup.select("article.mf_pst"):
+        if _is_album_article(article):
+            album = _parse_album_article(article, page_url, title)
+            if album:
+                albums.append(album)
+            article.decompose()
+
+    tracks = parse_tracks(str(soup), page_url)
+    next_pages = []
     for link in soup.select("a[href]"):
         label = link.get_text(" ", strip=True).lower()
         rel = link.get("rel") or []
         href = link.get("href", "")
         if "next" in rel or label in {"بعدی", "صفحه بعدی", "بعد"}:
-            next_links.append(urljoin(page_url, href))
+            next_pages.append(urljoin(page_url, href))
 
     return {
         "name": title or None,
@@ -75,5 +134,6 @@ def parse_artist_archive(html, page_url):
         "description": description,
         "artwork_url": artwork_url,
         "tracks": tracks,
-        "next_pages": list(dict.fromkeys(next_links)),
+        "albums": albums,
+        "next_pages": list(dict.fromkeys(next_pages)),
     }
