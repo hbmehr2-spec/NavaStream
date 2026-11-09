@@ -21,9 +21,9 @@
 
 - An artist archive is evidence that Musics-fa groups songs under that artist; it is not proof of nationality, citizenship, or exclusive authorship.
 - A track can be associated with multiple artist archives (collaborations). Do not overwrite its original parsed artist string with the archive heading.
-- Foreign-language categories are not a reliable nationality classifier. Turkish, Arabic, Kurdish, and regional language content can also be Iranian. This stage does not auto-exclude tracks or label unknown artists as Iranian/foreign.
+- Foreign-language categories are not a reliable nationality classifier. Turkish, Arabic, Kurdish, and regional language content can also be Iranian. Track and artist records now carry `catalog_scope`, `scope_confidence`, and `scope_evidence`. Only exact matches against a small curated foreign-artist allowlist are marked `foreign` with high confidence; every other record remains `uncertain`. No artist or track is automatically labelled Iranian, and no uncertain record is excluded.
 - Artist archives can contain explicit album cards, identifiable from Persian «دانلود آلبوم» and English «Download New Album BY» metadata. The crawler stores album name, source URL, release date, artwork when present, and artist relationships as normalized entities. It excludes those cards from the ordinary track list. The inspected cards do not establish a separate album track-list structure, so the API explicitly reports that a track list was not provided rather than inventing one.
-- No production D1 migration or Worker deployment is performed by this PR. Migration `0004` is additive and does not alter Telegram publication rows.
+- Migrations `0004`–`0006` are additive and do not alter Telegram publication rows. No production D1 migration or Worker deployment is performed by this PR.
 
 ## Crawl controls
 
