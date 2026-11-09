@@ -68,6 +68,23 @@ function validateTrack(track) {
   return true;
 }
 
+function validateCatalogTrack(track) {
+  if (!track || typeof track !== "object" || Array.isArray(track)) return false;
+  if (typeof track.title !== "string" || !track.title.trim() || track.title.length > 500) return false;
+  if (track.artist !== null && track.artist !== undefined &&
+      (typeof track.artist !== "string" || track.artist.length > 500)) return false;
+  if (!validHttpsUrl(track.audio_url)) return false;
+  if (!validHttpsUrl(track.artwork_url, true)) return false;
+  if (!validHttpsUrl(track.source_url)) return false;
+  if (track.external_id !== null && track.external_id !== undefined &&
+      (typeof track.external_id !== "string" || track.external_id.length > 100)) return false;
+  if (track.release_date !== null && track.release_date !== undefined &&
+      (typeof track.release_date !== "string" || track.release_date.length > 64)) return false;
+  return ["matched", "mismatch", "needs_review", "excluded"].includes(
+    track.validation_status || "needs_review"
+  );
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -83,6 +100,80 @@ export default {
           "access-control-max-age": "86400",
         },
       });
+    }
+
+    if (path === "/internal/catalog-import") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed." }, 405);
+      }
+
+      const expectedSecret = env.NAVASTREAM_INGEST_SECRET;
+      if (!expectedSecret || expectedSecret.length < 32) {
+        return json({ error: "Catalog import endpoint is not configured." }, 503);
+      }
+
+      const authorization = request.headers.get("authorization") || "";
+      const candidate = authorization.startsWith("Bearer ")
+        ? authorization.slice(7)
+        : "";
+      if (!candidate || !(await equalSecret(candidate, expectedSecret))) {
+        return json({ error: "Unauthorized." }, 401);
+      }
+
+      const contentLength = Number(request.headers.get("content-length") || "0");
+      if (contentLength > 262144) {
+        return json({ error: "Payload too large." }, 413);
+      }
+
+      let payload;
+      try {
+        const body = await request.text();
+        if (new TextEncoder().encode(body).length > 262144) {
+          return json({ error: "Payload too large." }, 413);
+        }
+        payload = JSON.parse(body);
+      } catch {
+        return json({ error: "Invalid JSON." }, 400);
+      }
+
+      if (!payload || !Array.isArray(payload.tracks) ||
+          payload.tracks.length < 1 || payload.tracks.length > 100) {
+        return json({ error: "tracks must contain between 1 and 100 items." }, 400);
+      }
+      if (!payload.tracks.every(validateCatalogTrack)) {
+        return json({ error: "One or more catalog tracks contain invalid fields." }, 400);
+      }
+
+      try {
+        const statements = payload.tracks.map((track) =>
+          env.DB.prepare(
+            "INSERT INTO catalog_tracks (title, artist, audio_url, artwork_url, source_url, external_id, release_date, validation_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_url) DO UPDATE SET title = excluded.title, artist = excluded.artist, audio_url = excluded.audio_url, artwork_url = excluded.artwork_url, external_id = excluded.external_id, release_date = excluded.release_date, validation_status = excluded.validation_status"
+          ).bind(
+            track.title.trim(),
+            track.artist || null,
+            track.audio_url,
+            track.artwork_url || null,
+            track.source_url,
+            track.external_id || null,
+            track.release_date || null,
+            track.validation_status || "needs_review",
+          )
+        );
+
+        await env.DB.batch(statements);
+        const result = await env.DB.prepare(
+          "SELECT COUNT(*) AS total FROM catalog_tracks WHERE audio_url LIKE 'https://%'"
+        ).first();
+
+        return json({
+          ok: true,
+          imported: payload.tracks.length,
+          catalogTracks: result?.total || 0,
+        });
+      } catch (error) {
+        console.error("NavaStream catalog import failed:", error);
+        return json({ error: "Catalog import failed. No success was reported." }, 500);
+      }
     }
 
     if (path === "/internal/import") {
@@ -165,15 +256,21 @@ export default {
 
     try {
       if (path === "/health") {
-        const result = await env.DB.prepare(
-          "SELECT COUNT(*) AS published_tracks, MAX(published_at) AS latest_publication FROM tracks WHERE telegram_message_id IS NOT NULL AND audio_url LIKE 'https://%'"
-        ).first();
+        const [publishedResult, catalogResult] = await Promise.all([
+          env.DB.prepare(
+            "SELECT COUNT(*) AS total, MAX(published_at) AS latest_publication FROM tracks WHERE telegram_message_id IS NOT NULL AND audio_url LIKE 'https://%'"
+          ).first(),
+          env.DB.prepare(
+            "SELECT COUNT(*) AS total FROM catalog_tracks WHERE audio_url LIKE 'https://%'"
+          ).first(),
+        ]);
 
         return json({
           ok: true,
           service: "navastream-api",
-          publishedTracks: result?.published_tracks || 0,
-          latestPublication: result?.latest_publication || null,
+          publishedTracks: publishedResult?.total || 0,
+          catalogTracks: catalogResult?.total || 0,
+          latestPublication: publishedResult?.latest_publication || null,
         });
       }
 
@@ -190,11 +287,11 @@ export default {
         let statement;
         if (query) {
           statement = env.DB.prepare(
-            "SELECT id, title, artist, audio_url, artwork_url, duration_seconds, published_at FROM tracks WHERE telegram_message_id IS NOT NULL AND audio_url LIKE 'https://%' AND (title LIKE ? OR artist LIKE ?) ORDER BY COALESCE(published_at, created_at) DESC, id DESC LIMIT ? OFFSET ?"
+            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' AND (title LIKE ? OR artist LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?"
           ).bind(`%${query}%`, `%${query}%`, limit + 1, offset);
         } else {
           statement = env.DB.prepare(
-            "SELECT id, title, artist, audio_url, artwork_url, duration_seconds, published_at FROM tracks WHERE telegram_message_id IS NOT NULL AND audio_url LIKE 'https://%' ORDER BY COALESCE(published_at, created_at) DESC, id DESC LIMIT ? OFFSET ?"
+            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' ORDER BY id DESC LIMIT ? OFFSET ?"
           ).bind(limit + 1, offset);
         }
 
@@ -211,7 +308,7 @@ export default {
       const match = path.match(/^\/v1\/tracks\/(\d+)$/);
       if (match) {
         const row = await env.DB.prepare(
-          "SELECT id, title, artist, audio_url, artwork_url, duration_seconds, published_at FROM tracks WHERE id = ? AND telegram_message_id IS NOT NULL AND audio_url LIKE 'https://%' LIMIT 1"
+          "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at FROM catalog_tracks WHERE id = ? AND audio_url LIKE 'https://%' AND validation_status != 'excluded' LIMIT 1"
         ).bind(Number(match[1])).first();
 
         if (!row) return json({ error: "Track not found." }, 404);
