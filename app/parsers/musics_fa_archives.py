@@ -57,16 +57,26 @@ def extract_artist_links(html, page_url):
 
 
 
-def extract_artist_links_from_track_page(html, page_url):
-    """Extract explicit artist archive links from song-page content."""
+def _normalize_artist_link_name(value):
+    value = (value or "").replace("ي", "ی").replace("ك", "ک")
+    value = re.sub(r"[\u064B-\u065F\u0670]", "", value)
+    return re.sub(r"\s+", " ", value).strip().casefold()
+
+
+def extract_artist_links_from_track_page(html, page_url, expected_artist=None):
+    """Extract archive links, including an exact match in the site's singer list."""
     soup = BeautifulSoup(html, "html.parser")
     found = {}
+    expected_key = _normalize_artist_link_name(expected_artist)
 
     for link in soup.select("a[href]"):
         label = re.sub(r"\s+", " ", link.get_text(" ", strip=True))
         is_archive_label = bool(re.search(r"آرشیو", label))
         is_inside_song_article = link.find_parent("article", class_="mf_pst") is not None
-        if not is_archive_label and not is_inside_song_article:
+        is_exact_artist_match = bool(
+            expected_key and _normalize_artist_link_name(label) == expected_key
+        )
+        if not is_archive_label and not is_inside_song_article and not is_exact_artist_match:
             continue
 
         href = urljoin(page_url, link.get("href", ""))
@@ -78,13 +88,17 @@ def extract_artist_links_from_track_page(html, page_url):
         if len(path_parts) != 2 or path_parts[0] != "artists":
             continue
 
-        name = re.sub(r"^آرشیو\s*", "", label)
-        name = re.sub(
-            r"^(?:آهنگ(?:های|\s+های)?|نوحه(?:های|\s+های)?|مداحی(?:های|\s+های)?)\s*",
-            "",
-            name,
-        )
-        name = re.sub(r"\s+", " ", name).strip(" -|")
+        if is_exact_artist_match:
+            name = expected_artist.strip()
+        else:
+            name = re.sub(r"^آرشیو\s*", "", label)
+            name = re.sub(
+                r"^(?:آهنگ(?:های|\s+های)?|نوحه(?:های|\s+های)?|مداحی(?:های|\s+های)?)\s*",
+                "",
+                name,
+            )
+            name = re.sub(r"\s+", " ", name).strip(" -|")
+
         if not name or _is_non_artist_archive_name(name):
             continue
 
