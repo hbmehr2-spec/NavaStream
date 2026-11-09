@@ -60,6 +60,17 @@ async def ensure_artist_tables():
         CREATE INDEX IF NOT EXISTS idx_track_artists_artist
             ON catalog_track_artists(artist_id, track_id);
         """)
+        cursor = await db.execute("PRAGMA table_info(catalog_artists)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        for column, definition in (
+            ("catalog_scope", "TEXT NOT NULL DEFAULT 'uncertain'"),
+            ("scope_confidence", "TEXT NOT NULL DEFAULT 'low'"),
+            ("scope_evidence", "TEXT"),
+        ):
+            if column not in columns:
+                await db.execute(
+                    f"ALTER TABLE catalog_artists ADD COLUMN {column} {definition}"
+                )
         await db.commit()
 
 
