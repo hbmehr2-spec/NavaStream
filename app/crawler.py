@@ -165,7 +165,7 @@ async def enrich_tracks_from_details(session, source_id, tracks):
     return enriched
 
 
-async def save_tracks(source_id, tracks):
+async def save_tracks(source_id, tracks, enqueue=True):
     inserted = 0
     updated = 0
 
@@ -279,15 +279,16 @@ async def save_tracks(source_id, tracks):
                 track_id = cursor.lastrowid
                 inserted += 1
 
-            await db.execute(
-                """
-                INSERT OR IGNORE INTO processing_queue (track_id)
-                VALUES (?)
-                """,
-                (track_id,)
-            )
+            if enqueue:
+                await db.execute(
+                    """
+                    INSERT OR IGNORE INTO processing_queue (track_id)
+                    VALUES (?)
+                    """,
+                    (track_id,)
+                )
 
-            if track.get("validation_status") == "excluded":
+            if enqueue and track.get("validation_status") == "excluded":
                 await db.execute(
                     """
                     UPDATE processing_queue
@@ -299,7 +300,7 @@ async def save_tracks(source_id, tracks):
                     """,
                     (track_id,),
                 )
-            elif track.get("validation_status") == "matched":
+            elif enqueue and track.get("validation_status") == "matched":
                 await db.execute(
                     """
                     UPDATE processing_queue
