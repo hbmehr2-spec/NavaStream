@@ -227,6 +227,49 @@ class MusicsFaParserTests(unittest.TestCase):
         self.assertEqual(result["scope_evidence"], "no_verified_origin_evidence")
 
 
+
+    def test_prefers_explicit_persian_artist_over_combined_data_artist(self):
+        html = """
+        <article class="mf_pst" data-id="129101"
+                 data-artist="بچه تو که شده آهن دلت خجسته">
+          <header><h1>دانلود آهنگ بچه تو که شده آهن دلت خجسته</h1></header>
+          <p>دانلود آهنگ بچه تو که شده آهن دلت</p>
+          <p>هم اکنون دانلود اهنگ بچه تو که شده آهن دلت منم خیلی وقته دلم خورده بهت
+             با صدای خجسته به همراه تکست و بهترین کیفیت</p>
+          <p>Download Old Music BY : Khojaste | Bache With Text And 2 Quality 320 And 128 On Music-fa</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Khojaste-Bache.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/129101/",
+        )
+
+        self.assertEqual(track["artist"], "خجسته")
+        self.assertEqual(track["title"], "بچه تو که شده آهن دلت")
+        self.assertEqual(track["artist_source"], "detail_text")
+
+    def test_uses_english_artist_when_data_artist_contains_artist_and_title(self):
+        html = """
+        <article class="mf_pst" data-id="129102"
+                 data-artist="تونکی تونجل farkında mısın">
+          <header><h1>دانلود آهنگ تونکی تونجل farkında mısın</h1></header>
+          <p>دانلود آهنگ تونکی تونجل farkında mısın</p>
+          <p>Download New Music BY : Tuncay Tuncel | farkında mısın With Text And 2 Quality 320 And 128 On Music-fa</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Tuncay-Tuncel-farkinda-misin.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/129102/",
+        )
+
+        self.assertEqual(track["artist"], "Tuncay Tuncel")
+        self.assertEqual(track["title"], "farkında mısın")
+        self.assertEqual(track["artist_source"], "english_metadata")
+
     def test_uses_data_artist_and_cleans_fallback_heading(self):
         html = """
         <article class="mf_pst" data-id="129001" data-artist="وحید پورجمشید">
