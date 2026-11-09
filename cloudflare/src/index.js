@@ -39,6 +39,7 @@ function trackPayload(row) {
     genreTags: parseJsonArray(row.genre_tags_json),
     languageTags: parseJsonArray(row.language_tags_json),
     regionTags: parseJsonArray(row.region_tags_json),
+    trendTags: parseJsonArray(row.trend_tags_json),
     versionType: row.version_type || null,
     artistSource: row.artist_source || null,
     artistConfidence: row.artist_confidence || null,
@@ -105,6 +106,7 @@ function validateCatalogTrack(track) {
     "genre_tags_json",
     "language_tags_json",
     "region_tags_json",
+    "trend_tags_json",
   ];
   for (const field of jsonFields) {
     const value = track[field] ?? "[]";
@@ -197,7 +199,7 @@ export default {
       try {
         const statements = payload.tracks.map((track) =>
           env.DB.prepare(
-            "INSERT INTO catalog_tracks (title, artist, audio_url, artwork_url, source_url, external_id, release_date, validation_status, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, version_type, artist_source, artist_confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_url) DO UPDATE SET title = excluded.title, artist = excluded.artist, audio_url = excluded.audio_url, artwork_url = excluded.artwork_url, external_id = excluded.external_id, release_date = excluded.release_date, validation_status = excluded.validation_status, source_categories_json = excluded.source_categories_json, mood_tags_json = excluded.mood_tags_json, genre_tags_json = excluded.genre_tags_json, language_tags_json = excluded.language_tags_json, region_tags_json = excluded.region_tags_json, version_type = excluded.version_type, artist_source = excluded.artist_source, artist_confidence = excluded.artist_confidence"
+            "INSERT INTO catalog_tracks (title, artist, audio_url, artwork_url, source_url, external_id, release_date, validation_status, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_url) DO UPDATE SET title = excluded.title, artist = excluded.artist, audio_url = excluded.audio_url, artwork_url = excluded.artwork_url, external_id = excluded.external_id, release_date = excluded.release_date, validation_status = excluded.validation_status, source_categories_json = excluded.source_categories_json, mood_tags_json = excluded.mood_tags_json, genre_tags_json = excluded.genre_tags_json, language_tags_json = excluded.language_tags_json, region_tags_json = excluded.region_tags_json, trend_tags_json = excluded.trend_tags_json, version_type = excluded.version_type, artist_source = excluded.artist_source, artist_confidence = excluded.artist_confidence"
           ).bind(
             track.title.trim(),
             track.artist || null,
@@ -212,6 +214,7 @@ export default {
             track.genre_tags_json || "[]",
             track.language_tags_json || "[]",
             track.region_tags_json || "[]",
+            track.trend_tags_json || "[]",
             track.version_type || null,
             track.artist_source || null,
             track.artist_confidence || null,
@@ -345,11 +348,11 @@ export default {
         let statement;
         if (query) {
           statement = env.DB.prepare(
-            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, version_type, artist_source, artist_confidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' AND (title LIKE ? OR artist LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?"
+            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' AND (title LIKE ? OR artist LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?"
           ).bind(`%${query}%`, `%${query}%`, limit + 1, offset);
         } else {
           statement = env.DB.prepare(
-            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, version_type, artist_source, artist_confidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' ORDER BY id DESC LIMIT ? OFFSET ?"
+            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' ORDER BY id DESC LIMIT ? OFFSET ?"
           ).bind(limit + 1, offset);
         }
 
@@ -366,7 +369,7 @@ export default {
       const match = path.match(/^\/v1\/tracks\/(\d+)$/);
       if (match) {
         const row = await env.DB.prepare(
-          "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, version_type, artist_source, artist_confidence FROM catalog_tracks WHERE id = ? AND audio_url LIKE 'https://%' AND validation_status != 'excluded' LIMIT 1"
+          "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence FROM catalog_tracks WHERE id = ? AND audio_url LIKE 'https://%' AND validation_status != 'excluded' LIMIT 1"
         ).bind(Number(match[1])).first();
 
         if (!row) return json({ error: "Track not found." }, 404);
