@@ -59,4 +59,4 @@ PYTHONPATH=. python scripts/reset_local_catalog.py
 
 The script first creates a timestamped SQLite backup using SQLite's online backup API. It then clears local tracks, processing queue, normalized artists/albums, and their relationship tables. It preserves the source registry and schema. The backup contains the previous local catalog and queue and can be restored if needed.
 
-After reset, crawl Musics-fa again with `PYTHONPATH=. python -m app.main` (or the project's configured crawler entry point), then run the artist archive crawler. Do not run Cloudflare sync until the fresh local crawl and validation are complete.
+For the complete local rebuild in one command, use `PYTHONPATH=. python -m scripts.rebuild_local_catalog`. It backs up and clears the local catalog, crawls the main Musics-fa listing (default target 5,000 tracks), then crawls up to 2,000 artist archives with up to 100 pages each. It does not modify Cloudflare. Review the crawl totals before running the three Cloudflare sync scripts.
