@@ -276,6 +276,9 @@ export default {
         artist.name.length <= 300 && validHttpsUrl(artist.source_url) &&
         (artist.description == null || (typeof artist.description === "string" && artist.description.length <= 4000)) &&
         (artist.artwork_url == null || validHttpsUrl(artist.artwork_url, true)) &&
+        ["iranian", "foreign", "uncertain"].includes(artist.catalog_scope || "uncertain") &&
+        ["high", "medium", "low"].includes(artist.scope_confidence || "low") &&
+        (artist.scope_evidence == null || (typeof artist.scope_evidence === "string" && artist.scope_evidence.length <= 100)) &&
         Array.isArray(artist.track_source_urls) && artist.track_source_urls.length <= 500 &&
         artist.track_source_urls.every((value) => validHttpsUrl(value))
       );
