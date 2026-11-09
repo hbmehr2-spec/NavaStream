@@ -5,6 +5,7 @@ import sqlite3
 import sys
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -18,6 +19,13 @@ API_URL = os.getenv(
     "https://navastream-api.hb-mehr2.workers.dev",
 ).rstrip("/")
 BATCH_SIZE = 50
+TAXONOMY_FIELDS = (
+    "source_categories_json",
+    "mood_tags_json",
+    "genre_tags_json",
+    "language_tags_json",
+    "region_tags_json",
+)
 
 
 def load_configuration():
@@ -39,7 +47,10 @@ def read_catalog_tracks(limit):
             """
             SELECT
                 id, title, artist, audio_url, artwork_url,
-                source_url, external_id, release_date, validation_status
+                source_url, external_id, release_date, validation_status,
+                source_categories_json, mood_tags_json, genre_tags_json,
+                language_tags_json, region_tags_json, version_type,
+                artist_source, artist_confidence
             FROM tracks
             WHERE audio_url LIKE 'https://%'
               AND source_url IS NOT NULL
@@ -59,6 +70,14 @@ def read_catalog_tracks(limit):
                 "external_id": row["external_id"],
                 "release_date": row["release_date"],
                 "validation_status": row["validation_status"] or "needs_review",
+                "source_categories_json": row["source_categories_json"] or "[]",
+                "mood_tags_json": row["mood_tags_json"] or "[]",
+                "genre_tags_json": row["genre_tags_json"] or "[]",
+                "language_tags_json": row["language_tags_json"] or "[]",
+                "region_tags_json": row["region_tags_json"] or "[]",
+                "version_type": row["version_type"],
+                "artist_source": row["artist_source"],
+                "artist_confidence": row["artist_confidence"],
             }
             for row in rows
         ]
@@ -79,7 +98,7 @@ def send_batch(secret, tracks):
         headers={
             "Authorization": f"Bearer {secret}",
             "Content-Type": "application/json; charset=utf-8",
-            "User-Agent": "NavaStream-Catalog-Sync/1.0",
+            "User-Agent": "NavaStream-Catalog-Sync/1.1",
             "Accept": "application/json",
         },
     )
@@ -102,6 +121,20 @@ def send_batch(secret, tracks):
     return result
 
 
+def _valid_json_array(value):
+    if not isinstance(value, str) or len(value) > 8000:
+        return False
+    try:
+        decoded = json.loads(value)
+        return (
+            isinstance(decoded, list)
+            and len(decoded) <= 100
+            and all(isinstance(item, str) and len(item) <= 100 for item in decoded)
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def catalog_track_errors(track):
     errors = []
 
@@ -118,12 +151,8 @@ def catalog_track_errors(track):
         if not isinstance(value, str) or len(value) > 2048:
             errors.append(field)
             continue
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(value)
-            if parsed.scheme != "https" or not parsed.netloc:
-                errors.append(field)
-        except Exception:
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.netloc:
             errors.append(field)
 
     artwork = track.get("artwork_url")
@@ -131,7 +160,6 @@ def catalog_track_errors(track):
         if not isinstance(artwork, str) or len(artwork) > 2048:
             errors.append("artwork_url")
         else:
-            from urllib.parse import urlparse
             parsed = urlparse(artwork)
             if parsed.scheme != "https" or not parsed.netloc:
                 errors.append("artwork_url")
@@ -151,6 +179,21 @@ def catalog_track_errors(track):
     status = track.get("validation_status") or "needs_review"
     if status not in ("matched", "mismatch", "needs_review", "excluded"):
         errors.append("validation_status")
+
+    for field in TAXONOMY_FIELDS:
+        if not _valid_json_array(track.get(field, "[]")):
+            errors.append(field)
+
+    for field, max_length in (
+        ("version_type", 50),
+        ("artist_source", 50),
+        ("artist_confidence", 20),
+    ):
+        value = track.get(field)
+        if value is not None and (
+            not isinstance(value, str) or len(value) > max_length
+        ):
+            errors.append(field)
 
     return errors
 
@@ -173,7 +216,6 @@ def main():
 
     valid_tracks = []
     invalid_count = 0
-
     for index, track in enumerate(tracks, start=1):
         errors = catalog_track_errors(track)
         if errors:
