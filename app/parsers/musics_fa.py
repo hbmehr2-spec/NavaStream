@@ -360,11 +360,11 @@ def _extract_track_identity(article, audio_url):
         if not paragraph:
             continue
         if lead_title is None and re.match(
-            r"^دانلود\\s*(?:آهنگ|اهنگ)\\s*", paragraph, re.IGNORECASE
+            r"^دانلود\s*(?:آهنگ|اهنگ)\s*", paragraph, re.IGNORECASE
         ):
             candidate = _clean_identity_field(
                 re.sub(
-                    r"^دانلود\\s*(?:آهنگ|اهنگ)\\s*(?:جدید\\s*)?",
+                    r"^دانلود\s*(?:آهنگ|اهنگ)\s*(?:جدید\s*)?",
                     "",
                     paragraph,
                     flags=re.IGNORECASE,
@@ -391,11 +391,11 @@ def _extract_track_identity(article, audio_url):
 
     if lead_title and explicit_artist:
         lead_title = re.sub(
-            rf"^{re.escape(explicit_artist)}\\s+|\\s+{re.escape(explicit_artist)}$",
+            rf"^{re.escape(explicit_artist)}\s+|\s+{re.escape(explicit_artist)}$",
             "",
             lead_title,
             flags=re.IGNORECASE,
-        ).strip(" \\t-–—|،,؛;:.!؟") or None
+        ).strip(" \t-–—|،,؛;:.!؟") or None
 
     if lead_title and english_title:
         if _normalise_filename(english_title) in _normalise_filename(lead_title):
