@@ -19,6 +19,36 @@ class MusicsFaArchiveParserTests(unittest.TestCase):
             "https://musics-fa.com/artists/mohsen-chavoshi/",
         )
 
+    def test_excludes_category_archives_and_pagination_links(self):
+        html = """
+        <a href="/artists/mohsen-chavoshi/">محسن چاوشی</a>
+        <a href="/artists/turkish-songs/">ترکی</a>
+        <a href="/artists/kurdish-songs/">کردی</a>
+        <a href="/artists/ai-music/">هوش مصنوعی</a>
+        <a href="/artists/mohsen-chavoshi/page/2/">صفحه بعدی</a>
+        """
+        artists = extract_artist_links(html, "https://musics-fa.com/")
+        self.assertEqual(
+            artists,
+            [{
+                "name": "محسن چاوشی",
+                "source_url": "https://musics-fa.com/artists/mohsen-chavoshi/",
+            }],
+        )
+
+    def test_normalizes_devotional_archive_heading_to_person_name(self):
+        html = """
+        <html>
+          <head><title>دانلود تمام نوحه های محمود کریمی</title></head>
+          <body><h1>دانلود تمام نوحه های محمود کریمی</h1></body>
+        </html>
+        """
+        archive = parse_artist_archive(
+            html,
+            "https://musics-fa.com/artists/mahmoud-karimi/",
+        )
+        self.assertEqual(archive["name"], "محمود کریمی")
+
     def test_parses_artist_identity_and_track_list(self):
         html = """
         <html>
