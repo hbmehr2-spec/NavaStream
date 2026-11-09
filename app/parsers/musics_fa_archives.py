@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 
 
 ALBUM_EN_RE = re.compile(
-    r"Download\\s+(?:New\\s+)?Album\\s+BY\\s*:\\s*(?P<artist>[^|]+?)\\s*\\|\\s*(?P<album>.+?)(?=\\s+With\\s+(?:Text|Lyrics)\\b|\\s+And\\s+\\d+\\s+Quality\\b|\\s+On\\s+Music-fa\\b|$)",
+    r"Download\s+(?:New\s+)?Album\s+BY\s*:\s*(?P<artist>[^|]+?)\s*\|\s*(?P<album>.+?)(?=\s+With\s+(?:Text|Lyrics)\b|\s+And\s+\d+\s+Quality\b|\s+On\s+Music-fa\b|$)",
     re.IGNORECASE,
 )
 
@@ -32,7 +32,7 @@ def extract_artist_links(html, page_url):
 def _is_album_article(article):
     text = article.get_text(" ", strip=True)
     return bool(
-        re.search(r"دانلود\\s*آلبوم|Download\\s+(?:New\\s+)?Album\\s+BY", text, re.IGNORECASE)
+        re.search(r"دانلود\s*آلبوم|Download\s+(?:New\s+)?Album\s+BY", text, re.IGNORECASE)
     )
 
 
@@ -50,10 +50,10 @@ def _parse_album_article(article, page_url, artist_name):
     album_name = english.group("album").strip() if english else None
     artist_candidate = english.group("artist").strip() if english else artist_name
     if not album_name:
-        album_name = re.sub(r"^دانلود\\s*آلبوم(?:\\s*جدید)?\\s*", "", heading_text, flags=re.IGNORECASE)
+        album_name = re.sub(r"^دانلود\s*آلبوم(?:\s*جدید)?\s*", "", heading_text, flags=re.IGNORECASE)
         if artist_name and album_name.startswith(artist_name):
             album_name = album_name[len(artist_name):].strip(" -–—")
-    album_name = re.sub(r"\\s+", " ", album_name or "").strip(" -–—|")
+    album_name = re.sub(r"\s+", " ", album_name or "").strip(" -–—|")
     if not album_name or not source_url:
         return None
 
@@ -84,12 +84,12 @@ def parse_artist_archive(html, page_url):
         soup.title.get_text(" ", strip=True) if soup.title else ""
     )
     title = re.sub(
-        r"^(?:دانلود\\s*)?(?:تمام\\s*)?آهنگ(?:های| های)?\\s*",
+        r"^(?:دانلود\s*)?(?:تمام\s*)?آهنگ(?:های| های)?\s*",
         "",
         title,
     )
     title = re.sub(
-        r"\\s*(?:جدید و کامل|جدید|MP3).*?$",
+        r"\s*(?:جدید و کامل|جدید|MP3).*?$",
         "",
         title,
         flags=re.IGNORECASE,
