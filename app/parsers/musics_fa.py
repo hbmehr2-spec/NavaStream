@@ -224,14 +224,13 @@ def _extract_source_categories(article):
 
 def _classify_categories(article, title, audio_url, artist):
     source_categories = _extract_source_categories(article)
-    evidence_text = " ".join(
-        [title or "", article.get_text(" ", strip=True), *source_categories]
-    )
+    evidence_text = " ".join([title or "", *source_categories])
     normalized = _normalise_fa(evidence_text)
     mood_tags = set()
     genre_tags = set()
     language_tags = set()
     region_tags = set()
+    trend_tags = set()
 
     for group_name, rules in CATEGORY_RULES.items():
         for term, tag in rules.items():
@@ -246,6 +245,12 @@ def _classify_categories(article, title, audio_url, artist):
                     region_tags.add(tag)
 
     source_text = " ".join(source_categories)
+    if any(
+        _normalise_fa(item) in {"ترند اینستاگرام", "ترند اینستا"}
+        for item in source_categories
+    ):
+        trend_tags.add("ترند اینستاگرام")
+
     version_type = None
     if re.search(r"هوش\s*مصنوعی|(?<![a-z])ai(?![a-z])|ai\s+naghme", source_text + " " + (title or "") + " " + (audio_url or ""), re.IGNORECASE):
         version_type = "ai_generated"
@@ -258,15 +263,13 @@ def _classify_categories(article, title, audio_url, artist):
     elif re.search(r"کاور|cover", normalized, re.IGNORECASE):
         version_type = "cover"
 
-    if any(_normalise_fa(item) in {"ترند اینستاگرام", "ترند اینستا"} for item in source_categories):
-        genre_tags.add("ترند شبکه‌های اجتماعی")
-
     return {
         "source_categories": source_categories,
         "mood_tags": sorted(mood_tags),
         "genre_tags": sorted(genre_tags),
         "language_tags": sorted(language_tags),
         "region_tags": sorted(region_tags),
+        "trend_tags": sorted(trend_tags),
         "version_type": version_type,
     }
 
@@ -387,6 +390,7 @@ def _metadata_fields(identity):
         "genre_tags_json": json.dumps(identity.get("genre_tags", []), ensure_ascii=False),
         "language_tags_json": json.dumps(identity.get("language_tags", []), ensure_ascii=False),
         "region_tags_json": json.dumps(identity.get("region_tags", []), ensure_ascii=False),
+        "trend_tags_json": json.dumps(identity.get("trend_tags", []), ensure_ascii=False),
         "version_type": identity.get("version_type"),
         "artist_source": identity.get("artist_source"),
         "artist_confidence": identity.get("artist_confidence"),
