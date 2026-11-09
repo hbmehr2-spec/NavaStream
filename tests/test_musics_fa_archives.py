@@ -1,6 +1,10 @@
 import unittest
 
-from app.parsers.musics_fa_archives import (\n    extract_artist_links,\n    extract_artist_links_from_track_page,\n    parse_artist_archive,\n)
+from app.parsers.musics_fa_archives import (
+    extract_artist_links,
+    extract_artist_links_from_track_page,
+    parse_artist_archive,
+)
 
 
 class MusicsFaArchiveParserTests(unittest.TestCase):
