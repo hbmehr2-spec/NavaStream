@@ -9,7 +9,7 @@ import aiosqlite
 
 from app.crawler import USER_AGENT, fetch_page, save_tracks
 from app.database import DB_PATH, init_db
-from app.parsers.musics_fa_archives import extract_artist_links, parse_artist_archive
+from app.parsers.musics_fa_archives import (\n    extract_artist_links,\n    extract_artist_links_from_track_page,\n    parse_artist_archive,\n)
 
 
 async def ensure_artist_tables():
@@ -153,7 +153,46 @@ async def save_artist_and_links(artist, source_tracks, albums):
         await db.commit()
 
 
-async def crawl_artist_archives(limit=250, page_limit=20):
+
+async def discover_artist_links_from_track_pages(session, limit):
+    """Find archive links in a small sample of currently unlinked song pages."""
+    if limit <= 0:
+        return []
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT MIN(t.source_url)
+            FROM tracks AS t
+            WHERE t.source_url IS NOT NULL
+              AND TRIM(t.source_url) != ''
+              AND t.artist IS NOT NULL
+              AND TRIM(t.artist) != ''
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM catalog_track_artists AS cta
+                  WHERE cta.track_id = t.id
+              )
+            GROUP BY TRIM(t.artist)
+            ORDER BY MIN(t.id)
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        track_urls = [row[0] for row in await cursor.fetchall() if row[0]]
+
+    discovered = {}
+    for track_url in track_urls:
+        html = await fetch_page(session, track_url)
+        if not html:
+            continue
+        for artist in extract_artist_links_from_track_page(html, track_url):
+            discovered.setdefault(artist["source_url"], artist)
+
+    return list(discovered.values())
+
+
+async def crawl_artist_archives(limit=250, page_limit=20, discover_track_pages=0):
     await init_db()
     await ensure_artist_tables()
     connector = aiohttp.TCPConnector(limit=5, ssl=False)
@@ -168,8 +207,23 @@ async def crawl_artist_archives(limit=250, page_limit=20):
             raise RuntimeError("Could not fetch Musics-fa homepage.")
 
         artists = extract_artist_links(homepage, "https://musics-fa.com/")
+        homepage_count = len(artists)
+
+        discovered = await discover_artist_links_from_track_pages(
+            session, discover_track_pages
+        )
+        known_urls = {artist["source_url"] for artist in artists}
+        for artist in discovered:
+            if artist["source_url"] not in known_urls:
+                artists.append(artist)
+                known_urls.add(artist["source_url"])
+
+        print(
+            f"Artist archives: {homepage_count} from homepage, "
+            f"{len(discovered)} discovered from {discover_track_pages} song page(s), "
+            f"{len(artists)} unique before limit"
+        )
         artists = artists[:limit]
-        print(f"Discovered artist archive links: {len(artists)}")
 
         totals = {"artists": 0, "albums": 0, "tracks_seen": 0, "tracks_inserted": 0, "tracks_updated": 0}
         for index, artist_link in enumerate(artists, start=1):
@@ -251,12 +305,24 @@ def main():
     parser = argparse.ArgumentParser(description="Crawl Musics-fa artist archives.")
     parser.add_argument("--limit", type=int, default=int(os.getenv("NAVASTREAM_ARTIST_LIMIT", "250")))
     parser.add_argument("--page-limit", type=int, default=int(os.getenv("NAVASTREAM_ARTIST_PAGE_LIMIT", "20")))
+    parser.add_argument(
+        "--discover-track-pages",
+        type=int,
+        default=0,
+        help="Also inspect this many distinct unlinked artist song pages for archive links.",
+    )
     args = parser.parse_args()
     if not 1 <= args.limit <= 2000:
         raise ValueError("--limit must be between 1 and 2000")
     if not 1 <= args.page_limit <= 100:
         raise ValueError("--page-limit must be between 1 and 100")
-    asyncio.run(crawl_artist_archives(args.limit, args.page_limit))
+    if not 0 <= args.discover_track_pages <= 5000:
+        raise ValueError("--discover-track-pages must be between 0 and 5000")
+    asyncio.run(
+        crawl_artist_archives(
+            args.limit, args.page_limit, args.discover_track_pages
+        )
+    )
 
 
 if __name__ == "__main__":
