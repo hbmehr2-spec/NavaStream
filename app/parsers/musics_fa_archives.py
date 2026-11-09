@@ -104,7 +104,7 @@ def parse_artist_archive(html, page_url):
         urljoin(page_url, canonical_tag.get("href"))
         if canonical_tag and canonical_tag.get("href") else page_url
     )
-    image = soup.select_one("main img, article img, .artist img")
+    image = soup.select_one(".artist img, .artist-avatar img, [itemprop='image']")
     artwork_url = None
     if image:
         image_src = image.get("data-src") or image.get("data-lazy-src") or image.get("src")
