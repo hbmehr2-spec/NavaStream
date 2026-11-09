@@ -32,7 +32,7 @@ PAGE_NOISE_RE = re.compile(
 IDENTITY_CUTOFF_RE = re.compile(
     r"\s*(?:به\s+همراه|همراه\s+با|با\s+کیفیت|پخش\s+آنلاین|"
     r"دانلود\s+(?:آهنگ|اهنگ)|موزیک\s*فا|music[- ]?fa|"
-    r"آرشیو\s+آهنگ).*?$",
+    r"آرشیو\s+آهنگ|هوش\s*مصنوعی|ترند\s+اینستاگرام|ترند\s+اینستا).*?$",
     re.IGNORECASE,
 )
 
@@ -75,6 +75,13 @@ GENERIC_ARTISTS = {
     "ai nagh me",
     "هوش مصنوعی",
     "ترند اینستاگرام",
+    "مرد",
+    "زن",
+    "خواننده",
+    "خواننده مرد",
+    "خواننده زن",
+    "صدای مرد",
+    "صدای زن",
 }
 
 CATEGORY_RULES = {
@@ -296,7 +303,9 @@ def _extract_source_categories(article):
 
 def _classify_categories(article, title, audio_url, artist):
     source_categories = _extract_source_categories(article)
-    evidence_text = " ".join([title or "", *source_categories])
+    # A word appearing in a song title is not evidence of language, region,
+    # genre, or mood. Only explicit source taxonomy labels may create tags.
+    evidence_text = " ".join(source_categories)
     normalized = _normalise_fa(evidence_text)
     mood_tags = set()
     genre_tags = set()
@@ -410,10 +419,17 @@ def _extract_track_identity(article, audio_url):
     else:
         title = lead_title or persian_match_title or english_title
 
+    normalized_data_artist = _normalise_fa(data_artist)
+    normalized_lead_title = _normalise_fa(lead_title)
     data_artist_is_ambiguous = bool(
         data_artist
         and lead_title
-        and _normalise_fa(data_artist) == _normalise_fa(lead_title)
+        and (
+            normalized_data_artist == normalized_lead_title
+            or normalized_data_artist in normalized_lead_title
+            or normalized_lead_title in normalized_data_artist
+            or SequenceMatcher(None, normalized_data_artist, normalized_lead_title).ratio() >= 0.82
+        )
     )
     artist = explicit_artist or english_artist or (
         data_artist if not data_artist_is_ambiguous else None
