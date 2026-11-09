@@ -63,7 +63,7 @@ def extract_artist_links_from_track_page(html, page_url):
     found = {}
 
     for link in soup.select("a[href]"):
-        label = re.sub(r"\\s+", " ", link.get_text(" ", strip=True))
+        label = re.sub(r"\s+", " ", link.get_text(" ", strip=True))
         if not re.search(r"آرشیو", label):
             continue
 
@@ -78,7 +78,7 @@ def extract_artist_links_from_track_page(html, page_url):
 
         name = re.sub(r"^آرشیو\\s*", "", label)
         name = re.sub(r"^(?:آهنگ(?:های|\\s+های)?|نوحه(?:های|\\s+های)?|مداحی(?:های|\\s+های)?)\\s*", "", name)
-        name = re.sub(r"\\s+", " ", name).strip(" -|")
+        name = re.sub(r"\s+", " ", name).strip(" -|")
         if not name or _is_non_artist_archive_name(name):
             continue
 
