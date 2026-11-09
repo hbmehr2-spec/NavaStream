@@ -102,6 +102,59 @@ def send_batch(secret, tracks):
     return result
 
 
+def catalog_track_errors(track):
+    errors = []
+
+    title = track.get("title")
+    if not isinstance(title, str) or not title.strip() or len(title) > 500:
+        errors.append("title")
+
+    artist = track.get("artist")
+    if artist is not None and (not isinstance(artist, str) or len(artist) > 500):
+        errors.append("artist")
+
+    for field in ("audio_url", "source_url"):
+        value = track.get(field)
+        if not isinstance(value, str) or len(value) > 2048:
+            errors.append(field)
+            continue
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(value)
+            if parsed.scheme != "https" or not parsed.netloc:
+                errors.append(field)
+        except Exception:
+            errors.append(field)
+
+    artwork = track.get("artwork_url")
+    if artwork not in (None, ""):
+        if not isinstance(artwork, str) or len(artwork) > 2048:
+            errors.append("artwork_url")
+        else:
+            from urllib.parse import urlparse
+            parsed = urlparse(artwork)
+            if parsed.scheme != "https" or not parsed.netloc:
+                errors.append("artwork_url")
+
+    external_id = track.get("external_id")
+    if external_id is not None and (
+        not isinstance(external_id, str) or len(external_id) > 100
+    ):
+        errors.append("external_id")
+
+    release_date = track.get("release_date")
+    if release_date is not None and (
+        not isinstance(release_date, str) or len(release_date) > 64
+    ):
+        errors.append("release_date")
+
+    status = track.get("validation_status") or "needs_review"
+    if status not in ("matched", "mismatch", "needs_review", "excluded"):
+        errors.append("validation_status")
+
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=1000)
@@ -118,9 +171,28 @@ def main():
         print("Nothing to transfer.")
         return
 
+    valid_tracks = []
+    invalid_count = 0
+
+    for index, track in enumerate(tracks, start=1):
+        errors = catalog_track_errors(track)
+        if errors:
+            invalid_count += 1
+            print(
+                f"SKIPPED invalid record #{index}: "
+                f"fields={','.join(errors)}; source_url={track.get('source_url')}"
+            )
+        else:
+            valid_tracks.append(track)
+
+    print(
+        f"Pre-validation: {len(valid_tracks)} valid, "
+        f"{invalid_count} invalid records."
+    )
+
     imported = 0
-    for start in range(0, len(tracks), BATCH_SIZE):
-        batch = tracks[start:start + BATCH_SIZE]
+    for start in range(0, len(valid_tracks), BATCH_SIZE):
+        batch = valid_tracks[start:start + BATCH_SIZE]
         result = send_batch(secret, batch)
         imported += result.get("imported", 0)
         print(
@@ -129,7 +201,10 @@ def main():
             f"server catalog total: {result.get('catalogTracks', 0)}"
         )
 
-    print(f"Catalog sync completed. Records sent: {imported}.")
+    print(
+        f"Catalog sync completed. Records sent: {imported}; "
+        f"invalid records skipped: {invalid_count}."
+    )
     print(f"Check API: {API_URL}/health")
 
 
