@@ -237,6 +237,67 @@ export default {
       }
     }
 
+    if (path === "/internal/artist-import") {
+      if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+      const expectedSecret = env.NAVASTREAM_INGEST_SECRET;
+      if (!expectedSecret || expectedSecret.length < 32) {
+        return json({ error: "Artist import endpoint is not configured." }, 503);
+      }
+      const authorization = request.headers.get("authorization") || "";
+      const candidate = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+      if (!candidate || !(await equalSecret(candidate, expectedSecret))) {
+        return json({ error: "Unauthorized." }, 401);
+      }
+      let payload;
+      try {
+        const body = await request.text();
+        if (new TextEncoder().encode(body).length > 262144) return json({ error: "Payload too large." }, 413);
+        payload = JSON.parse(body);
+      } catch {
+        return json({ error: "Invalid JSON." }, 400);
+      }
+      if (!payload || !Array.isArray(payload.artists) ||
+          payload.artists.length < 1 || payload.artists.length > 50) {
+        return json({ error: "artists must contain between 1 and 50 items." }, 400);
+      }
+      const valid = payload.artists.every((artist) =>
+        artist && typeof artist.name === "string" && artist.name.trim().length > 0 &&
+        artist.name.length <= 300 && validHttpsUrl(artist.source_url) &&
+        (artist.description == null || (typeof artist.description === "string" && artist.description.length <= 4000)) &&
+        (artist.artwork_url == null || validHttpsUrl(artist.artwork_url, true)) &&
+        Array.isArray(artist.track_source_urls) && artist.track_source_urls.length <= 500 &&
+        artist.track_source_urls.every((value) => validHttpsUrl(value))
+      );
+      if (!valid) return json({ error: "One or more artist records are invalid." }, 400);
+      try {
+        let linkedTracks = 0;
+        for (const artist of payload.artists) {
+          await env.DB.prepare(
+            "INSERT INTO catalog_artists (name, source_url, description, artwork_url, last_crawled_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(source_url) DO UPDATE SET name = excluded.name, description = COALESCE(excluded.description, catalog_artists.description), artwork_url = COALESCE(excluded.artwork_url, catalog_artists.artwork_url), last_crawled_at = CURRENT_TIMESTAMP"
+          ).bind(artist.name.trim(), artist.source_url, artist.description || null, artist.artwork_url || null).run();
+          const saved = await env.DB.prepare(
+            "SELECT id FROM catalog_artists WHERE source_url = ? LIMIT 1"
+          ).bind(artist.source_url).first();
+          if (!saved) continue;
+          for (const trackUrl of [...new Set(artist.track_source_urls)]) {
+            const track = await env.DB.prepare(
+              "SELECT id FROM catalog_tracks WHERE source_url = ? LIMIT 1"
+            ).bind(trackUrl).first();
+            if (!track) continue;
+            await env.DB.prepare(
+              "INSERT OR IGNORE INTO catalog_track_artists (artist_id, track_id, source_url) VALUES (?, ?, ?)"
+            ).bind(saved.id, track.id, trackUrl).run();
+            linkedTracks += 1;
+          }
+        }
+        const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM catalog_artists").first();
+        return json({ ok: true, imported: payload.artists.length, linkedTracks, artistsTotal: count?.total || 0 });
+      } catch (error) {
+        console.error("NavaStream artist import failed:", error);
+        return json({ error: "Artist import failed." }, 500);
+      }
+    }
+
     if (path === "/internal/import") {
       if (request.method !== "POST") {
         return json({ error: "Method not allowed." }, 405);
@@ -332,6 +393,42 @@ export default {
           publishedTracks: publishedResult?.total || 0,
           catalogTracks: catalogResult?.total || 0,
           latestPublication: publishedResult?.latest_publication || null,
+        });
+      }
+
+      if (path === "/v1/artists") {
+        const query = (url.searchParams.get("q") || "").trim().slice(0, 120);
+        const limit = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "30", 10) || 30));
+        const offset = Math.max(0, Number.parseInt(url.searchParams.get("cursor") || "0", 10) || 0);
+        const statement = query
+          ? env.DB.prepare("SELECT a.id, a.name, a.source_url, a.description, a.artwork_url, COUNT(ta.track_id) AS track_count FROM catalog_artists a LEFT JOIN catalog_track_artists ta ON ta.artist_id = a.id WHERE a.name LIKE ? GROUP BY a.id ORDER BY a.name COLLATE NOCASE LIMIT ? OFFSET ?").bind(`%${query}%`, limit + 1, offset)
+          : env.DB.prepare("SELECT a.id, a.name, a.source_url, a.description, a.artwork_url, COUNT(ta.track_id) AS track_count FROM catalog_artists a LEFT JOIN catalog_track_artists ta ON ta.artist_id = a.id GROUP BY a.id ORDER BY a.name COLLATE NOCASE LIMIT ? OFFSET ?").bind(limit + 1, offset);
+        const result = await statement.all();
+        const rows = result.results || [];
+        const hasMore = rows.length > limit;
+        return json({
+          items: rows.slice(0, limit).map((row) => ({
+            id: String(row.id), name: row.name, sourceUrl: row.source_url,
+            description: row.description, artworkUrl: row.artwork_url,
+            trackCount: row.track_count || 0,
+          })),
+          nextCursor: hasMore ? String(offset + limit) : null,
+        });
+      }
+
+      const artistMatch = path.match(/^\\/v1\\/artists\\/(\\d+)$/);
+      if (artistMatch) {
+        const artist = await env.DB.prepare(
+          "SELECT id, name, source_url, description, artwork_url FROM catalog_artists WHERE id = ? LIMIT 1"
+        ).bind(Number(artistMatch[1])).first();
+        if (!artist) return json({ error: "Artist not found." }, 404);
+        const tracks = await env.DB.prepare(
+          "SELECT t.id, t.title, t.artist, t.audio_url, t.artwork_url, t.published_at, t.source_categories_json, t.mood_tags_json, t.genre_tags_json, t.language_tags_json, t.region_tags_json, t.trend_tags_json, t.version_type, t.artist_source, t.artist_confidence FROM catalog_track_artists ta JOIN catalog_tracks t ON t.id = ta.track_id WHERE ta.artist_id = ? AND t.audio_url LIKE 'https://%' AND t.validation_status != 'excluded' ORDER BY t.id DESC"
+        ).bind(artist.id).all();
+        return json({
+          id: String(artist.id), name: artist.name, sourceUrl: artist.source_url,
+          description: artist.description, artworkUrl: artist.artwork_url,
+          tracks: (tracks.results || []).map(trackPayload),
         });
       }
 
