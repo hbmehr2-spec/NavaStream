@@ -51,7 +51,8 @@ def read_catalog_tracks(limit):
                 source_url, external_id, release_date, validation_status,
                 source_categories_json, mood_tags_json, genre_tags_json,
                 language_tags_json, region_tags_json, trend_tags_json, version_type,
-                artist_source, artist_confidence
+                artist_source, artist_confidence, catalog_scope,
+                scope_confidence, scope_evidence
             FROM tracks
             WHERE audio_url LIKE 'https://%'
               AND source_url IS NOT NULL
@@ -80,6 +81,9 @@ def read_catalog_tracks(limit):
                 "version_type": row["version_type"],
                 "artist_source": row["artist_source"],
                 "artist_confidence": row["artist_confidence"],
+                "catalog_scope": row["catalog_scope"] or "uncertain",
+                "scope_confidence": row["scope_confidence"] or "low",
+                "scope_evidence": row["scope_evidence"] or "no_verified_origin_evidence",
             }
             for row in rows
         ]
@@ -190,6 +194,9 @@ def catalog_track_errors(track):
         ("version_type", 50),
         ("artist_source", 50),
         ("artist_confidence", 20),
+        ("catalog_scope", 20),
+        ("scope_confidence", 20),
+        ("scope_evidence", 100),
     ):
         value = track.get(field)
         if value is not None and (
