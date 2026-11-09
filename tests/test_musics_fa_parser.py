@@ -290,5 +290,43 @@ class MusicsFaParserTests(unittest.TestCase):
         self.assertEqual(track["artist_source"], "detail_text")
         self.assertEqual(track["title"], "کجا گمت کردم")
 
+
+    def test_generic_gender_label_is_not_saved_as_artist(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>سلام ای روح خسته من</h1></header>
+          <p>دانلود آهنگ سلام ای روح خسته من با صدای مرد</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Unknown-Artist-Salam.mp3"></span>
+        </article>
+        """
+        track = parse_track_detail(html, "https://musics-fa.com/download-song/129201/")
+        self.assertIsNone(track["artist"])
+        self.assertIsNone(track["artist_source"])
+        self.assertEqual(track["validation_status"], "needs_review")
+
+    def test_title_words_do_not_create_language_or_region_tags(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>آهنگ ترکی و کردی برای تو</h1></header>
+          <p>دانلود آهنگ ترکی و کردی برای تو</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Unknown-Artist-Song.mp3"></span>
+        </article>
+        """
+        track = parse_track_detail(html, "https://musics-fa.com/download-song/129202/")
+        self.assertEqual(json.loads(track["language_tags_json"]), [])
+        self.assertEqual(json.loads(track["region_tags_json"]), [])
+
+    def test_combined_data_artist_similar_to_title_is_not_trusted(self):
+        html = """
+        <article class="mf_pst" data-artist="فکر منو نکن دورچی">
+          <header><h1>دانلود آهنگ فکر منو نکن</h1></header>
+          <p>دانلود آهنگ فکر منو نکن</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Unknown-Artist-Track.mp3"></span>
+        </article>
+        """
+        track = parse_track_detail(html, "https://musics-fa.com/download-song/129203/")
+        self.assertIsNone(track["artist"])
+        self.assertEqual(track["validation_status"], "needs_review")
+
 if __name__ == "__main__":
     unittest.main()
