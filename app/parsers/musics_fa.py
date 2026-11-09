@@ -364,9 +364,14 @@ def _extract_track_identity(article, audio_url):
         ):
             candidate = _clean_identity_field(
                 re.sub(
-                    r"^دانلود\s*(?:آهنگ|اهنگ)\s*(?:جدید\s*)?",
+                    r"\s+با\s+صدای\b.*$",
                     "",
-                    paragraph,
+                    re.sub(
+                        r"^دانلود\s*(?:آهنگ|اهنگ)\s*(?:جدید\s*)?",
+                        "",
+                        paragraph,
+                        flags=re.IGNORECASE,
+                    ),
                     flags=re.IGNORECASE,
                 )
             )
