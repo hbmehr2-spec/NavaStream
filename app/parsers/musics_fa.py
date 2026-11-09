@@ -1,3 +1,4 @@
+import json
 import re
 from difflib import SequenceMatcher
 from html import unescape
@@ -19,21 +20,93 @@ ENGLISH_TRACK_RE = re.compile(
     r"(?=\s+With\s+(?:Text|Lyrics)\b|\s+And\s+\d+\s+Quality\b|\s+On\s+Music-fa\b|$)",
     re.IGNORECASE,
 )
-PERSIAN_ARCHIVE_ARTIST_RE = re.compile(
-    r"آرشیو\s+آهنگ\s+های\s+(?P<artist>.+?)"
-    r"(?=\s+آرشیو\s+آهنگ\s+های|\s+کانال\s+رسمی|\s+پخش\s+آنلاین|\s+دانلود\s+آهنگ|$)",
-    re.IGNORECASE,
-)
-PERSIAN_BREADCRUMB_ARTIST_RE = re.compile(
-    r"موزیکفا\s*[•|]\s*(?P<artist>[^•|]+?)\s*[•|]",
-    re.IGNORECASE,
-)
 AUDIO_EXTENSIONS = (".mp3", ".m4a", ".flac", ".wav", ".aac", ".ogg")
 
-MADDahi_RE = re.compile(
+MADDAHI_RE = re.compile(
     r"مداحی|مداح|نوحه(?:خوانی)?|روضه(?:خوانی)?|مرثیه(?:خوانی)?|سینه[\s‌_-]*زنی",
     re.IGNORECASE,
 )
+
+GENERIC_ARTISTS = {
+    "unknown artist",
+    "unknwon artist",
+    "unknown",
+    "different artist",
+    "ai",
+    "a i",
+    "ai nagh me",
+    "ai nagh me",
+    "هوش مصنوعی",
+    "ترند اینستاگرام",
+}
+
+CATEGORY_RULES = {
+    "mood": {
+        "شاد": "شاد",
+        "غمگین": "غمگین",
+        "عاشقانه": "عاشقانه",
+        "احساسی": "احساسی",
+        "آرامش": "آرامش‌بخش",
+        "آرامش‌بخش": "آرامش‌بخش",
+        "دلتنگی": "دلتنگی",
+        "انرژی": "انرژی‌بخش",
+        "رقص": "رقص",
+        "پارتی": "مهمانی",
+        "مهمانی": "مهمانی",
+        "لالایی": "لالایی",
+        "تولد": "مناسبت",
+    },
+    "genre": {
+        "پاپ": "پاپ",
+        "رپ": "رپ",
+        "هیپ هاپ": "هیپ‌هاپ",
+        "هیپ‌هاپ": "هیپ‌هاپ",
+        "راک": "راک",
+        "سنتی": "سنتی",
+        "کلاسیک": "کلاسیک",
+        "فولکلور": "فولکلور",
+        "محلی": "محلی",
+        "تلفیقی": "تلفیقی",
+        "الکترونیک": "الکترونیک",
+        "ریمیکس": "ریمیکس",
+        "بی کلام": "بی‌کلام",
+        "بی‌کلام": "بی‌کلام",
+    },
+    "region": {
+        "بندری": "بندری",
+        "لری": "لری",
+        "لکی": "لکی",
+        "کردی": "کردی",
+        "کرمانجی": "کرمانجی",
+        "ترکی": "ترکی",
+        "آذری": "آذری",
+        "مازندرانی": "مازندرانی",
+        "شمالی": "شمالی",
+        "گیلکی": "گیلکی",
+        "خراسانی": "خراسانی",
+        "بلوچی": "بلوچی",
+        "افغانی": "افغانستان",
+        "افغان": "افغانستان",
+        "عربی": "عربی",
+    },
+    "language": {
+        "فارسی": "فارسی",
+        "پارسی": "فارسی",
+        "ترکی": "ترکی",
+        "آذری": "ترکی",
+        "کردی": "کردی",
+        "عربی": "عربی",
+        "لری": "لری",
+        "گیلکی": "گیلکی",
+        "مازندرانی": "مازندرانی",
+        "بلوچی": "بلوچی",
+        "انگلیسی": "انگلیسی",
+        "اسپانیایی": "اسپانیایی",
+        "هندی": "هندی",
+        "کره‌ای": "کره‌ای",
+        "روسی": "روسی",
+    },
+}
 
 
 def _clean(value):
@@ -56,6 +129,27 @@ def _compact(value):
     return re.sub(r"[^a-z0-9]", "", _normalise_filename(value))
 
 
+def _normalise_fa(value):
+    value = _clean(value) or ""
+    value = value.replace("ي", "ی").replace("ك", "ک")
+    value = value.replace("\u200c", " ")
+    return re.sub(r"\s+", " ", value).strip().lower()
+
+
+def _is_generic_artist(value):
+    if not value:
+        return True
+    normalized = _normalise_fa(value)
+    compact = re.sub(r"[^a-z0-9آ-ی]", "", normalized)
+    if normalized in GENERIC_ARTISTS:
+        return True
+    if compact in {"هوشمصنوعی", "ترنداینستاگرام", "unknownartist", "unknwonartist"}:
+        return True
+    if re.fullmatch(r"ai(?:\s+naghme?)?", normalized, re.IGNORECASE):
+        return True
+    return False
+
+
 def _audio_matches(audio_url, english_artist, english_title):
     if not audio_url or not english_artist or not english_title:
         return None
@@ -68,46 +162,113 @@ def _audio_matches(audio_url, english_artist, english_title):
     if not filename or not artist or not title:
         return None
 
-    # Ignore harmless differences in spaces and punctuation.
     if artist in filename and title in filename:
         return True
 
-    # A close artist transliteration with an exact title is uncertain,
-    # not a confirmed match and not a definite mismatch.
     if title in filename:
         artist_from_filename = filename.split(title, 1)[0].strip()
         if artist_from_filename:
-            similarity = SequenceMatcher(
-                None, artist, artist_from_filename
-            ).ratio()
+            similarity = SequenceMatcher(None, artist, artist_from_filename).ratio()
             if similarity >= 0.80:
                 return None
 
     return False
 
 
-def _extract_archive_artist(paragraphs):
-    for paragraph in paragraphs:
-        if not paragraph:
+def _filename_artist_candidate(audio_url):
+    if not audio_url:
+        return None
+    filename = unquote(PurePosixPath(urlparse(audio_url).path).name)
+    filename = re.sub(
+        r"\.(mp3|m4a|flac|wav|aac|ogg)$", "", filename, flags=re.IGNORECASE
+    )
+    filename = re.sub(r"\s*\([^)]*\)\s*$", "", filename)
+    filename = re.sub(r"\s+Musics[- ]?Fa.*$", "", filename, flags=re.IGNORECASE)
+    if " - " not in filename:
+        return None
+    candidate = _clean(filename.split(" - ", 1)[0])
+    if not candidate or _is_generic_artist(candidate):
+        return None
+    if len(candidate) > 100 or re.search(r"https?://", candidate, re.IGNORECASE):
+        return None
+    return candidate
+
+
+def _extract_source_categories(article):
+    categories = []
+    seen = set()
+    for link in article.select("a[href]"):
+        label = _clean(link.get_text(" ", strip=True))
+        href = (link.get("href") or "").lower()
+        if not label:
             continue
-
-        match = PERSIAN_ARCHIVE_ARTIST_RE.search(paragraph)
-        if match:
-            artist = _clean(match.group("artist"))
-            if artist:
-                return artist
-
-    for paragraph in paragraphs:
-        if not paragraph:
+        is_taxonomy_link = any(
+            marker in href
+            for marker in ("/category/", "/tag/", "/genre/", "/music-category/")
+        )
+        known_label = any(
+            _normalise_fa(label) == _normalise_fa(term)
+            for group in CATEGORY_RULES.values()
+            for term in group
+        ) or _normalise_fa(label) in {
+            "هوش مصنوعی", "ترند اینستاگرام", "مداحی", "ترند اینستا"
+        }
+        if not (is_taxonomy_link or known_label):
             continue
+        key = _normalise_fa(label)
+        if key and key not in seen:
+            seen.add(key)
+            categories.append(label)
+    return categories
 
-        match = PERSIAN_BREADCRUMB_ARTIST_RE.search(paragraph)
-        if match:
-            artist = _clean(match.group("artist"))
-            if artist:
-                return artist
 
-    return None
+def _classify_categories(article, title, audio_url, artist):
+    source_categories = _extract_source_categories(article)
+    evidence_text = " ".join(
+        [title or "", article.get_text(" ", strip=True), *source_categories]
+    )
+    normalized = _normalise_fa(evidence_text)
+    mood_tags = set()
+    genre_tags = set()
+    language_tags = set()
+    region_tags = set()
+
+    for group_name, rules in CATEGORY_RULES.items():
+        for term, tag in rules.items():
+            if _normalise_fa(term) in normalized:
+                if group_name == "mood":
+                    mood_tags.add(tag)
+                elif group_name == "genre":
+                    genre_tags.add(tag)
+                elif group_name == "language":
+                    language_tags.add(tag)
+                elif group_name == "region":
+                    region_tags.add(tag)
+
+    source_text = " ".join(source_categories)
+    version_type = None
+    if re.search(r"هوش\s*مصنوعی|(?<![a-z])ai(?![a-z])|ai\s+naghme", source_text + " " + (title or "") + " " + (audio_url or ""), re.IGNORECASE):
+        version_type = "ai_generated"
+    elif re.search(r"ریمیکس|remix", normalized, re.IGNORECASE):
+        version_type = "remix"
+    elif re.search(r"اجرای\s*زنده|\blive\b", normalized, re.IGNORECASE):
+        version_type = "live"
+    elif re.search(r"بی\s*کلام|instrumental", normalized, re.IGNORECASE):
+        version_type = "instrumental"
+    elif re.search(r"کاور|cover", normalized, re.IGNORECASE):
+        version_type = "cover"
+
+    if any(_normalise_fa(item) in {"ترند اینستاگرام", "ترند اینستا"} for item in source_categories):
+        genre_tags.add("ترند شبکه‌های اجتماعی")
+
+    return {
+        "source_categories": source_categories,
+        "mood_tags": sorted(mood_tags),
+        "genre_tags": sorted(genre_tags),
+        "language_tags": sorted(language_tags),
+        "region_tags": sorted(region_tags),
+        "version_type": version_type,
+    }
 
 
 def _extract_track_identity(article, audio_url):
@@ -129,36 +290,57 @@ def _extract_track_identity(article, audio_url):
         if persian_match and english_match:
             break
 
-    artist = _clean(persian_match.group("artist")) if persian_match else None
+    explicit_artist = (
+        _clean(persian_match.group("artist")) if persian_match else None
+    )
     title = _clean(persian_match.group("title")) if persian_match else None
-
     english_artist = _clean(english_match.group("artist")) if english_match else None
     english_title = _clean(english_match.group("title")) if english_match else None
 
-    if not artist:
-        artist = english_artist or _extract_archive_artist(paragraphs)
     if not title:
         title = english_title
 
+    artist = explicit_artist or english_artist
+    artist_source = "detail_text" if explicit_artist else (
+        "english_metadata" if english_artist else None
+    )
+    artist_confidence = "high" if artist and not _is_generic_artist(artist) else None
+
+    if _is_generic_artist(artist):
+        artist = None
+        artist_source = None
+        artist_confidence = None
+
+    if not artist:
+        candidate = _filename_artist_candidate(audio_url)
+        if candidate:
+            artist = candidate
+            artist_source = "audio_filename_candidate"
+            artist_confidence = "low"
+
+    classification = _classify_categories(article, title, audio_url, artist)
     classification_text = " ".join(
         (
             article.get_text(" ", strip=True),
             audio_url or "",
             artist or "",
             title or "",
+            " ".join(classification["source_categories"]),
         )
     ).replace("\u200c", " ")
 
-    if MADDahi_RE.search(classification_text):
-        return (
-            artist,
-            title,
-            "excluded",
-            "Religious recitation/maddahi content is excluded from publishing.",
-        )
+    if MADDAHI_RE.search(classification_text):
+        return {
+            "artist": artist,
+            "title": title,
+            "validation_status": "excluded",
+            "validation_note": "Religious recitation/maddahi content is excluded from the music catalog.",
+            "artist_source": artist_source,
+            "artist_confidence": artist_confidence,
+            **classification,
+        }
 
     audio_match = _audio_matches(audio_url, english_artist, english_title)
-
     if audio_match is True:
         validation_status = "matched"
         validation_note = "Audio filename matches the English artist and title metadata."
@@ -167,9 +349,20 @@ def _extract_track_identity(article, audio_url):
         validation_note = "Audio filename does not match the English artist and title metadata."
     else:
         validation_status = "needs_review"
-        validation_note = "Artist/title metadata is incomplete or has an uncertain transliteration."
+        if artist_source == "audio_filename_candidate":
+            validation_note = "Artist is a candidate extracted from the audio filename and requires confirmation."
+        else:
+            validation_note = "Artist/title metadata is incomplete or has an uncertain transliteration."
 
-    return artist, title, validation_status, validation_note
+    return {
+        "artist": artist,
+        "title": title,
+        "validation_status": validation_status,
+        "validation_note": validation_note,
+        "artist_source": artist_source,
+        "artist_confidence": artist_confidence,
+        **classification,
+    }
 
 
 def _extract_artwork(article, page_url):
@@ -183,6 +376,21 @@ def _extract_artwork(article, page_url):
         or image.get("src")
     )
     return urljoin(page_url, artwork_url) if artwork_url else None
+
+
+def _metadata_fields(identity):
+    return {
+        "source_categories_json": json.dumps(
+            identity.get("source_categories", []), ensure_ascii=False
+        ),
+        "mood_tags_json": json.dumps(identity.get("mood_tags", []), ensure_ascii=False),
+        "genre_tags_json": json.dumps(identity.get("genre_tags", []), ensure_ascii=False),
+        "language_tags_json": json.dumps(identity.get("language_tags", []), ensure_ascii=False),
+        "region_tags_json": json.dumps(identity.get("region_tags", []), ensure_ascii=False),
+        "version_type": identity.get("version_type"),
+        "artist_source": identity.get("artist_source"),
+        "artist_confidence": identity.get("artist_confidence"),
+    }
 
 
 def parse_track_detail(html, page_url):
@@ -199,10 +407,7 @@ def parse_track_detail(html, page_url):
         else None
     )
 
-    artist, title, validation_status, validation_note = _extract_track_identity(
-        article,
-        audio_url,
-    )
+    identity = _extract_track_identity(article, audio_url)
 
     external_id = _clean(article.get("data-id"))
     if not external_id:
@@ -211,8 +416,8 @@ def parse_track_detail(html, page_url):
 
     heading_tag = article.select_one("header h1, header h2, h1, h2")
     heading = _clean(heading_tag.get_text(" ", strip=True)) if heading_tag else None
-    if not title:
-        title = re.sub(
+    if not identity["title"]:
+        identity["title"] = re.sub(
             r"^دانلود\s*(?:آهنگ|اهنگ)\s*",
             "",
             heading or "",
@@ -220,26 +425,25 @@ def parse_track_detail(html, page_url):
         ) or heading
 
     date_tag = article.select_one("header div span")
-    release_date = (
-        _clean(date_tag.get_text(" ", strip=True))
-        if date_tag else None
-    )
+    release_date = _clean(date_tag.get_text(" ", strip=True)) if date_tag else None
 
-    if not external_id and not audio_url and not artist and not title:
+    if not external_id and not audio_url and not identity["artist"] and not identity["title"]:
         return None
 
-    return {
+    result = {
         "external_id": external_id,
-        "artist": artist,
-        "title": title,
+        "artist": identity["artist"],
+        "title": identity["title"],
         "release_date": release_date,
         "source_url": page_url,
         "artwork_url": _extract_artwork(article, page_url),
         "audio_url": audio_url,
         "fingerprint": f"musics-fa:{external_id}" if external_id else page_url,
-        "validation_status": validation_status,
-        "validation_note": validation_note,
+        "validation_status": identity["validation_status"],
+        "validation_note": identity["validation_note"],
     }
+    result.update(_metadata_fields(identity))
+    return result
 
 
 def parse_tracks(html, page_url=BASE_URL):
@@ -255,34 +459,39 @@ def parse_tracks(html, page_url=BASE_URL):
         external_id = _clean(article.get("data-id"))
         source_url = urljoin(page_url, link.get("href", ""))
         player = article.select_one("span.play[data-song]")
-        audio_url = urljoin(page_url, player.get("data-song", "")) if player else None
+        audio_url = (
+            urljoin(page_url, player.get("data-song", ""))
+            if player and player.get("data-song")
+            else None
+        )
 
         date_tag = article.select_one("header div span")
         release_date = _clean(date_tag.get_text(" ", strip=True)) if date_tag else None
         artwork_url = _extract_artwork(article, page_url)
 
-        artist, title, validation_status, validation_note = _extract_track_identity(
-            article,
-            audio_url,
-        )
-
+        identity = _extract_track_identity(article, audio_url)
         heading = _clean(link.get_text(" ", strip=True))
-        if not title:
-            title = re.sub(r"^دانلود\s*(?:آهنگ|اهنگ)\s*", "", heading or "", flags=re.IGNORECASE) or heading
+        if not identity["title"]:
+            identity["title"] = re.sub(
+                r"^دانلود\s*(?:آهنگ|اهنگ)\s*",
+                "",
+                heading or "",
+                flags=re.IGNORECASE,
+            ) or heading
 
-        fingerprint = f"musics-fa:{external_id}" if external_id else source_url
-
-        tracks.append({
+        track = {
             "external_id": external_id,
-            "artist": artist,
-            "title": title,
+            "artist": identity["artist"],
+            "title": identity["title"],
             "release_date": release_date,
             "source_url": source_url,
             "artwork_url": artwork_url,
             "audio_url": audio_url,
-            "fingerprint": fingerprint,
-            "validation_status": validation_status,
-            "validation_note": validation_note,
-        })
+            "fingerprint": f"musics-fa:{external_id}" if external_id else source_url,
+            "validation_status": identity["validation_status"],
+            "validation_note": identity["validation_note"],
+        }
+        track.update(_metadata_fields(identity))
+        tracks.append(track)
 
     return tracks
