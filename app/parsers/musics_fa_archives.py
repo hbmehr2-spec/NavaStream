@@ -58,12 +58,34 @@ def extract_artist_links(html, page_url):
 
 
 def extract_artist_links_from_track_page(html, page_url):
-    """Extract artist archive links only from the song article, not page navigation."""
+    """Extract explicit artist archive links from song-page content."""
     soup = BeautifulSoup(html, "html.parser")
-    article = soup.select_one("article.mf_pst")
-    if not article:
-        return []
-    return extract_artist_links(str(article), page_url)
+    found = {}
+
+    for link in soup.select("a[href]"):
+        label = re.sub(r"\\s+", " ", link.get_text(" ", strip=True))
+        if not re.search(r"آرشیو", label):
+            continue
+
+        href = urljoin(page_url, link.get("href", ""))
+        parsed = urlparse(href)
+        if parsed.hostname not in {"musics-fa.com", "www.musics-fa.com"}:
+            continue
+
+        path_parts = [part for part in parsed.path.strip("/").split("/") if part]
+        if len(path_parts) != 2 or path_parts[0] != "artists":
+            continue
+
+        name = re.sub(r"^آرشیو\\s*", "", label)
+        name = re.sub(r"^(?:آهنگ(?:های|\\s+های)?|نوحه(?:های|\\s+های)?|مداحی(?:های|\\s+های)?)\\s*", "", name)
+        name = re.sub(r"\\s+", " ", name).strip(" -|")
+        if not name or _is_non_artist_archive_name(name):
+            continue
+
+        canonical_url = f"https://musics-fa.com/artists/{path_parts[1]}/"
+        found.setdefault(canonical_url, name)
+
+    return [{"name": name, "source_url": url} for url, name in found.items()]
 
 
 def _is_album_article(article):
