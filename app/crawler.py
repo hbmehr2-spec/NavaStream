@@ -126,6 +126,9 @@ async def enrich_tracks_from_details(session, source_id, tracks):
             "version_type",
             "artist_source",
             "artist_confidence",
+            "catalog_scope",
+            "scope_confidence",
+            "scope_evidence",
         ):
             if detail.get(key) is not None:
                 merged[key] = detail[key]
@@ -254,7 +257,10 @@ async def save_tracks(source_id, tracks, enqueue=True):
                             trend_tags_json = ?,
                             version_type = ?,
                             artist_source = ?,
-                            artist_confidence = ?
+                            artist_confidence = ?,
+                            catalog_scope = ?,
+                            scope_confidence = ?,
+                            scope_evidence = ?
                         WHERE id = ?
                         """,
                         (*values, existing[0])
@@ -270,9 +276,10 @@ async def save_tracks(source_id, tracks, enqueue=True):
                         validation_status, validation_note,
                         source_categories_json, mood_tags_json, genre_tags_json,
                         language_tags_json, region_tags_json, trend_tags_json,
-                        version_type, artist_source, artist_confidence, rights_status
+                        version_type, artist_source, artist_confidence,
+                        catalog_scope, scope_confidence, scope_evidence, rights_status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown')
                     """,
                     values
                 )
