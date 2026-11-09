@@ -47,3 +47,16 @@ The command creates timestamped CSV files for tracks and artists that still need
 ## Relationship integrity audit
 
 The read-only catalog review report also exports tracks with no normalized artist relation, artist entities with no linked catalog track, and album entities with no linked artist. These are audit candidates only. An absent relation is not proof of bad source data; collaborations and incomplete crawls can explain it. The report never creates or deletes relationships. The JSON summary includes counts for each category.
+
+
+## Local catalog rebuild
+
+To start over on the phone without touching the Cloudflare server, run:
+
+```bash
+PYTHONPATH=. python scripts/reset_local_catalog.py
+```
+
+The script first creates a timestamped SQLite backup using SQLite's online backup API. It then clears local tracks, processing queue, normalized artists/albums, and their relationship tables. It preserves the source registry and schema. The backup contains the previous local catalog and queue and can be restored if needed.
+
+After reset, crawl Musics-fa again with `PYTHONPATH=. python -m app.main` (or the project's configured crawler entry point), then run the artist archive crawler. Do not run Cloudflare sync until the fresh local crawl and validation are complete.
