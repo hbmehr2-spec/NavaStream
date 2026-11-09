@@ -196,5 +196,20 @@ class MusicsFaArchiveParserTests(unittest.TestCase):
         )
 
 
+    def test_deduplicates_percent_encoded_artist_urls_and_excludes_trend(self):
+        html = """
+        <a href="/artists/%d8%a2%d8%b1%d9%85%db%8c%d9%86/">آرمین برمایه</a>
+        <a href="/artists/%D8%A2%D8%B1%D9%85%DB%8C%D9%86/">آرمین برمایه</a>
+        <a href="/artists/trend/">ترند</a>
+        """
+        artists = extract_artist_links(html, "https://musics-fa.com/")
+        self.assertEqual(len(artists), 1)
+        self.assertEqual(artists[0]["name"], "آرمین برمایه")
+        self.assertEqual(
+            artists[0]["source_url"],
+            "https://musics-fa.com/artists/%D8%A2%D8%B1%D9%85%DB%8C%D9%86/",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
