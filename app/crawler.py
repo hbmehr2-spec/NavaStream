@@ -1,5 +1,6 @@
 import aiohttp
 import asyncio
+import os
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
@@ -337,7 +338,8 @@ async def crawl_source(session, source):
     if hostname == "musics-fa.com" or hostname.endswith(".musics-fa.com"):
         # The homepage contains only one page of songs (about 20).
         # Walk recent archive pages so a single crawl can build a useful catalog.
-        max_listing_pages = 10
+        target_limit = max(1, int(os.getenv("NAVASTREAM_CRAWL_LIMIT", "1000")))
+        max_listing_pages = min(100, max(10, (target_limit // 10) + 5))
         listing_tracks = []
         seen_listing_urls = set()
 
@@ -361,15 +363,20 @@ async def crawl_source(session, source):
             added_on_page = 0
             for item in page_tracks:
                 item_url = item.get("source_url")
-                if item_url and item_url not in seen_listing_urls:
+                if item_url and item_url not in seen_listing_urls and len(listing_tracks) < target_limit:
                     seen_listing_urls.add(item_url)
                     listing_tracks.append(item)
                     added_on_page += 1
 
             print(
                 f"Musics-fa listing page {page_number}: "
-                f"{len(page_tracks)} tracks, {added_on_page} new"
+                f"{len(page_tracks)} tracks, {added_on_page} new "
+                f"(catalog {len(listing_tracks)}/{target_limit})"
             )
+
+            if len(listing_tracks) >= target_limit:
+                print(f"Musics-fa crawl target reached: {target_limit}")
+                break
 
             if added_on_page == 0:
                 break
