@@ -21,6 +21,9 @@ async def ensure_artist_tables():
             source_url TEXT NOT NULL UNIQUE,
             description TEXT,
             artwork_url TEXT,
+            catalog_scope TEXT NOT NULL DEFAULT 'uncertain',
+            scope_confidence TEXT NOT NULL DEFAULT 'low',
+            scope_evidence TEXT,
             source_name TEXT NOT NULL DEFAULT 'Musics-fa',
             last_crawled_at TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -64,12 +67,18 @@ async def save_artist_and_links(artist, source_tracks, albums):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
-            INSERT INTO catalog_artists (name, source_url, description, artwork_url, last_crawled_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO catalog_artists (
+                name, source_url, description, artwork_url,
+                catalog_scope, scope_confidence, scope_evidence, last_crawled_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(source_url) DO UPDATE SET
                 name = excluded.name,
                 description = COALESCE(excluded.description, catalog_artists.description),
                 artwork_url = COALESCE(excluded.artwork_url, catalog_artists.artwork_url),
+                catalog_scope = excluded.catalog_scope,
+                scope_confidence = excluded.scope_confidence,
+                scope_evidence = excluded.scope_evidence,
                 last_crawled_at = CURRENT_TIMESTAMP
             """,
             (
@@ -77,6 +86,9 @@ async def save_artist_and_links(artist, source_tracks, albums):
                 artist["source_url"],
                 artist.get("description"),
                 artist.get("artwork_url"),
+                artist.get("catalog_scope", "uncertain"),
+                artist.get("scope_confidence", "low"),
+                artist.get("scope_evidence", "no_verified_origin_evidence"),
             ),
         )
         row = await db.execute(
