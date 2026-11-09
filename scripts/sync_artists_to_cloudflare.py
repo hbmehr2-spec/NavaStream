@@ -20,9 +20,13 @@ def load_data(limit):
     connection.row_factory = sqlite3.Row
     try:
         artists = connection.execute(
-            "SELECT id, name, source_url, description, artwork_url,
+            """
+            SELECT id, name, source_url, description, artwork_url,
                    catalog_scope, scope_confidence, scope_evidence
-            FROM catalog_artists ORDER BY id LIMIT ?",
+            FROM catalog_artists
+            ORDER BY id
+            LIMIT ?
+            """,
             (limit,),
         ).fetchall()
         output = []
