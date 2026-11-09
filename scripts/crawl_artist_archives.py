@@ -144,7 +144,7 @@ async def crawl_artist_archives(limit=250, page_limit=20):
             track_list = list(collected.values())
             if track_list:
                 source_id = await _get_musics_fa_source_id()
-                inserted, updated = await save_tracks(source_id, track_list)
+                inserted, updated = await save_tracks(source_id, track_list, enqueue=False)
                 totals["tracks_seen"] += len(track_list)
                 totals["tracks_inserted"] += inserted
                 totals["tracks_updated"] += updated
