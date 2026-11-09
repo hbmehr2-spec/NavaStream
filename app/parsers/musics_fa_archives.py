@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -17,6 +17,9 @@ NON_ARTIST_ARCHIVE_NAMES = {
     "موسیقی ترکی",
     "آهنگ ترکی",
     "آهنگ های ترکی",
+    "ترند",
+    "ترند اینستاگرام",
+    "موسیقی ترند",
     "موسیقی کردی",
     "آهنگ کردی",
     "آهنگ های کردی",
@@ -27,6 +30,11 @@ NON_ARTIST_ARCHIVE_NAMES = {
     "kurdish",
     "kurdish music",
 }
+
+
+def _canonical_artist_archive_url(slug):
+    normalized_slug = quote(unquote(slug), safe="-._~")
+    return f"https://musics-fa.com/artists/{normalized_slug}/"
 
 
 def _is_non_artist_archive_name(name):
@@ -49,7 +57,7 @@ def extract_artist_links(html, page_url):
         if len(path_parts) != 2:
             continue
         canonical_path = f"/artists/{path_parts[1]}/"
-        canonical_url = f"https://musics-fa.com{canonical_path}"
+        canonical_url = _canonical_artist_archive_url(path_parts[1])
         name = link.get_text(" ", strip=True)
         if name and not _is_non_artist_archive_name(name):
             found.setdefault(canonical_url, name)
@@ -102,7 +110,7 @@ def extract_artist_links_from_track_page(html, page_url, expected_artist=None):
         if not name or _is_non_artist_archive_name(name):
             continue
 
-        canonical_url = f"https://musics-fa.com/artists/{path_parts[1]}/"
+        canonical_url = _canonical_artist_archive_url(path_parts[1])
         found.setdefault(canonical_url, name)
 
     return [{"name": name, "source_url": url} for url, name in found.items()]
