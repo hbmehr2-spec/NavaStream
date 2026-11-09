@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      NAVASTREAM_CRAWL_LIMIT: ${{ inputs.target_tracks }}
+      NAVASTREAM_CRAWL_LIMIT: ${{ inputs.target_tracks }}\n      NAVASTREAM_ARTIST_LIMIT: ${{ inputs.target_artists }}
       NAVASTREAM_INGEST_SECRET: ${{ secrets.NAVASTREAM_INGEST_SECRET }}
       NAVASTREAM_API_URL: https://navastream-api.hb-mehr2.workers.dev
     steps:
@@ -53,10 +53,10 @@ jobs:
           asyncio.run(main())
           PY
 
-      - name: Import catalog into NavaStream server
+      - name: Crawl normalized artist archives\n        run: PYTHONPATH=. python scripts/crawl_artist_archives.py --limit "$NAVASTREAM_ARTIST_LIMIT"\n\n      - name: Import catalog into NavaStream server
         run: PYTHONPATH=. python scripts/sync_catalog_to_cloudflare.py --limit "$NAVASTREAM_CRAWL_LIMIT"
 
-      - name: Verify server catalog
+      - name: Import artists and artist-track relationships\n        run: PYTHONPATH=. python scripts/sync_artists_to_cloudflare.py --limit "$NAVASTREAM_ARTIST_LIMIT"\n\n      - name: Verify server catalog
         run: |
           curl --fail --silent --show-error "$NAVASTREAM_API_URL/health"
           echo
