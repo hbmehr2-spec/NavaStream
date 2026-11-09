@@ -4,7 +4,7 @@ import os
 import sys
 
 from app.crawler import crawl_all_sources
-from app.database import DB_PATH
+from app.database import DB_PATH, init_db
 from scripts.crawl_artist_archives import crawl_artist_archives
 from scripts.reset_local_catalog import reset_local_catalog
 
@@ -15,6 +15,9 @@ async def rebuild(limit: int, artist_limit: int, page_limit: int) -> None:
     backup_result = reset_local_catalog(DB_PATH)
     print(f"Local database backup: {backup_result['backup']}")
     print("Old local catalog and processing queue cleared.")
+
+    # Apply all schema migrations before the crawler writes any tracks.
+    await init_db()
 
     await crawl_all_sources()
     await crawl_artist_archives(limit=artist_limit, page_limit=page_limit)
