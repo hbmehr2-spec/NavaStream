@@ -8,6 +8,11 @@ on:
         required: true
         default: "1000"
         type: string
+      target_artists:
+        description: Maximum number of artist archives to collect
+        required: true
+        default: "100"
+        type: string
 
 permissions:
   contents: read
@@ -22,6 +27,7 @@ jobs:
     timeout-minutes: 60
     env:
       NAVASTREAM_CRAWL_LIMIT: ${{ inputs.target_tracks }}
+      NAVASTREAM_ARTIST_LIMIT: ${{ inputs.target_artists }}
       NAVASTREAM_INGEST_SECRET: ${{ secrets.NAVASTREAM_INGEST_SECRET }}
       NAVASTREAM_API_URL: https://navastream-api.hb-mehr2.workers.dev
     steps:
@@ -53,12 +59,25 @@ jobs:
           asyncio.run(main())
           PY
 
+      - name: Crawl normalized artist archives
+        run: PYTHONPATH=. python scripts/crawl_artist_archives.py --limit "$NAVASTREAM_ARTIST_LIMIT"
+
       - name: Import catalog into NavaStream server
         run: PYTHONPATH=. python scripts/sync_catalog_to_cloudflare.py --limit "$NAVASTREAM_CRAWL_LIMIT"
+
+      - name: Import artists and artist-track relationships
+        run: PYTHONPATH=. python scripts/sync_artists_to_cloudflare.py --limit "$NAVASTREAM_ARTIST_LIMIT"
+
+      - name: Import albums and artist-album relationships
+        run: PYTHONPATH=. python scripts/sync_albums_to_cloudflare.py --limit 10000
 
       - name: Verify server catalog
         run: |
           curl --fail --silent --show-error "$NAVASTREAM_API_URL/health"
           echo
           curl --fail --silent --show-error "$NAVASTREAM_API_URL/v1/tracks?limit=1"
+          echo
+          curl --fail --silent --show-error "$NAVASTREAM_API_URL/v1/artists?limit=1"
+          echo
+          curl --fail --silent --show-error "$NAVASTREAM_API_URL/v1/albums?limit=1"
           echo

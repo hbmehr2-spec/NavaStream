@@ -1,6 +1,7 @@
+import json
 import unittest
 
-from app.parsers.musics_fa import parse_track_detail, parse_tracks
+from app.parsers.musics_fa import classify_catalog_scope, parse_track_detail, parse_tracks
 
 
 class MusicsFaParserTests(unittest.TestCase):
@@ -101,14 +102,14 @@ class MusicsFaParserTests(unittest.TestCase):
         self.assertEqual(track["title"], "From Silence To Epic")
         self.assertEqual(track["validation_status"], "matched")
 
-    def test_extracts_artist_from_archive_text_without_false_audio_match(self):
+    def test_archive_breadcrumb_is_not_misidentified_as_artist(self):
         html = """
         <article class="mf_pst">
           <header><h1>دانلود آهنگ یکی نفسم بود گرفت نفسم ریمیکس</h1></header>
           <p>دانلود آهنگ یکی نفسم بود گرفت نفسم ریمیکس</p>
           <p>Download Old Music BY : Yeki Nafasem Bood With Text And 2 Quality 320 And 128 On Music-fa</p>
           <p>موزیکفا • رضا کرمی تارا • دانلود آهنگ یکی نفسم بود گرفت نفسم ریمیکس</p>
-          <p>پخش آنلاین آهنگ دانلود آهنگ با کیفیت 320 دانلود آهنگ با کیفیت 128 آرشیو آهنگ های رضا کرمی تارا کانال رسمی تلگرام موزیکفا</p>
+          <p>پخش آنلاین آهنگ دانلود آهنگ با کیفیت 320 آرشیو آهنگ های رضا کرمی تارا</p>
           <span class="play" data-song="https://dls.musics-fa.com/Unknown%20Artist%20-%20Yeki%20Nafasem%20Bood%20Remix.mp3"></span>
         </article>
         """
@@ -118,10 +119,66 @@ class MusicsFaParserTests(unittest.TestCase):
             "https://musics-fa.com/download-song/128468/",
         )
 
-        self.assertEqual(track["artist"], "رضا کرمی تارا")
-        self.assertEqual(track["title"], "یکی نفسم بود گرفت نفسم ریمیکس")
+        self.assertIsNone(track["artist"])
+        self.assertEqual(track["artist_source"], None)
         self.assertEqual(track["validation_status"], "needs_review")
-        self.assertIn("incomplete", track["validation_note"])
+
+    def test_ai_category_is_version_metadata_not_artist(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>تو اولین عشق تو آخرین عشق تویی لایق پرستش هوش مصنوعی</h1></header>
+          <a href="/category/ai/">هوش مصنوعی</a>
+          <span class="play" data-song="https://dls.musics-fa.com/Iliya%20-%20Avalin%20Eshgh%20To%20Akharin%20Eshgh.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/126593/",
+        )
+
+        self.assertEqual(track["artist"], "Iliya")
+        self.assertEqual(track["artist_source"], "audio_filename_candidate")
+        self.assertEqual(track["artist_confidence"], "low")
+        self.assertEqual(track["version_type"], "ai_generated")
+        self.assertEqual(json.loads(track["source_categories_json"]), ["هوش مصنوعی"])
+
+    def test_instagram_trend_is_separate_from_genre_and_artist(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>داره باورم میشه میمونی تا همیشه</h1></header>
+          <a href="/category/trend/">ترند اینستاگرام</a>
+          <span class="play" data-song="https://dls.musics-fa.com/Kamyar%20-%20Dare%20Bavaram%20Mishe.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/127745/",
+        )
+
+        self.assertEqual(track["artist"], "Kamyar")
+        self.assertEqual(json.loads(track["trend_tags_json"]), ["ترند اینستاگرام"])
+        self.assertNotIn("ترند شبکه‌های اجتماعی", json.loads(track["genre_tags_json"]))
+
+    def test_region_and_mood_categories_are_stored_separately(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>آهنگ شاد لری</h1></header>
+          <a href="/category/lori/">لری</a>
+          <a href="/category/happy/">شاد</a>
+          <span class="play" data-song="https://dls.musics-fa.com/Unknown%20Artist%20-%20Song.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/127820/",
+        )
+
+        self.assertEqual(json.loads(track["region_tags_json"]), ["لری"])
+        self.assertEqual(json.loads(track["mood_tags_json"]), ["شاد"])
+        self.assertIsNone(track["artist"])
 
     def test_detail_page_keeps_uncertain_transliteration_for_review(self):
         html = """
@@ -151,6 +208,125 @@ class MusicsFaParserTests(unittest.TestCase):
         tracks = parse_tracks(html)
         self.assertEqual(tracks[0]["validation_status"], "needs_review")
 
+
+
+    def test_known_foreign_artist_requires_exact_curated_match(self):
+        self.assertEqual(
+            classify_catalog_scope("Glass Animals"),
+            {
+                "catalog_scope": "foreign",
+                "scope_confidence": "high",
+                "scope_evidence": "curated_exact_foreign_artist_match",
+            },
+        )
+
+    def test_unknown_artist_is_not_assumed_to_be_iranian(self):
+        result = classify_catalog_scope("یک خواننده ناشناخته")
+        self.assertEqual(result["catalog_scope"], "uncertain")
+        self.assertEqual(result["scope_confidence"], "low")
+        self.assertEqual(result["scope_evidence"], "no_verified_origin_evidence")
+
+
+
+    def test_prefers_explicit_persian_artist_over_combined_data_artist(self):
+        html = """
+        <article class="mf_pst" data-id="129101"
+                 data-artist="بچه تو که شده آهن دلت خجسته">
+          <header><h1>دانلود آهنگ بچه تو که شده آهن دلت خجسته</h1></header>
+          <p>دانلود آهنگ بچه تو که شده آهن دلت</p>
+          <p>هم اکنون دانلود اهنگ بچه تو که شده آهن دلت منم خیلی وقته دلم خورده بهت
+             با صدای خجسته به همراه تکست و بهترین کیفیت</p>
+          <p>Download Old Music BY : Khojaste | Bache With Text And 2 Quality 320 And 128 On Music-fa</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Khojaste-Bache.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/129101/",
+        )
+
+        self.assertEqual(track["artist"], "خجسته")
+        self.assertEqual(track["title"], "بچه تو که شده آهن دلت")
+        self.assertEqual(track["artist_source"], "detail_text")
+
+    def test_uses_english_artist_when_data_artist_contains_artist_and_title(self):
+        html = """
+        <article class="mf_pst" data-id="129102"
+                 data-artist="تونکی تونجل farkında mısın">
+          <header><h1>دانلود آهنگ تونکی تونجل farkında mısın</h1></header>
+          <p>دانلود آهنگ تونکی تونجل farkında mısın</p>
+          <p>Download New Music BY : Tuncay Tuncel | farkında mısın With Text And 2 Quality 320 And 128 On Music-fa</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Tuncay-Tuncel-farkinda-misin.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/129102/",
+        )
+
+        self.assertEqual(track["artist"], "Tuncay Tuncel")
+        self.assertEqual(track["title"], "farkında mısın")
+        self.assertEqual(track["artist_source"], "english_metadata")
+
+    def test_uses_data_artist_and_cleans_fallback_heading(self):
+        html = """
+        <article class="mf_pst" data-id="129001" data-artist="وحید پورجمشید">
+          <header>
+            <h1>دانلود آهنگ جدید کجا گمت کردم | پخش آنلاین موزیکفا</h1>
+          </header>
+          <p>موزیکفا • پخش آنلاین آهنگ با کیفیت 320</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Vahid%20Pourjamshid%20-%20Koja%20Gomet%20Kardam.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/129001/",
+        )
+
+        self.assertEqual(track["artist"], "وحید پورجمشید")
+        self.assertEqual(track["artist_source"], "detail_text")
+        self.assertEqual(track["title"], "کجا گمت کردم")
+
+
+    def test_generic_gender_label_is_not_saved_as_artist(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>سلام ای روح خسته من</h1></header>
+          <p>دانلود آهنگ سلام ای روح خسته من با صدای مرد</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Unknown-Artist-Salam.mp3"></span>
+        </article>
+        """
+        track = parse_track_detail(html, "https://musics-fa.com/download-song/129201/")
+        self.assertIsNone(track["artist"])
+        self.assertIsNone(track["artist_source"])
+        self.assertEqual(track["validation_status"], "needs_review")
+
+    def test_title_words_do_not_create_language_or_region_tags(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>آهنگ ترکی و کردی برای تو</h1></header>
+          <p>دانلود آهنگ ترکی و کردی برای تو</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Unknown-Artist-Song.mp3"></span>
+        </article>
+        """
+        track = parse_track_detail(html, "https://musics-fa.com/download-song/129202/")
+        self.assertEqual(json.loads(track["language_tags_json"]), [])
+        self.assertEqual(json.loads(track["region_tags_json"]), [])
+
+    def test_combined_data_artist_similar_to_title_is_not_trusted(self):
+        html = """
+        <article class="mf_pst" data-artist="فکر منو نکن دورچی">
+          <header><h1>دانلود آهنگ فکر منو نکن</h1></header>
+          <p>دانلود آهنگ فکر منو نکن</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Unknown-Artist-Track.mp3"></span>
+        </article>
+        """
+        track = parse_track_detail(html, "https://musics-fa.com/download-song/129203/")
+        self.assertIsNone(track["artist"])
+        self.assertEqual(track["validation_status"], "needs_review")
 
 if __name__ == "__main__":
     unittest.main()
