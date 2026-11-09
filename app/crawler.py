@@ -225,6 +225,9 @@ async def save_tracks(source_id, tracks, enqueue=True):
                 track.get("version_type"),
                 track.get("artist_source"),
                 track.get("artist_confidence"),
+                track.get("catalog_scope", "uncertain"),
+                track.get("scope_confidence", "low"),
+                track.get("scope_evidence", "no_verified_origin_evidence"),
             )
 
             if existing:
