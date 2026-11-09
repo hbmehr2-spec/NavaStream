@@ -20,7 +20,9 @@ def load_data(limit):
     connection.row_factory = sqlite3.Row
     try:
         artists = connection.execute(
-            "SELECT id, name, source_url, description, artwork_url FROM catalog_artists ORDER BY id LIMIT ?",
+            "SELECT id, name, source_url, description, artwork_url,
+                   catalog_scope, scope_confidence, scope_evidence
+            FROM catalog_artists ORDER BY id LIMIT ?",
             (limit,),
         ).fetchall()
         output = []
@@ -34,6 +36,9 @@ def load_data(limit):
                 "source_url": artist["source_url"],
                 "description": artist["description"],
                 "artwork_url": artist["artwork_url"],
+                "catalog_scope": artist["catalog_scope"] or "uncertain",
+                "scope_confidence": artist["scope_confidence"] or "low",
+                "scope_evidence": artist["scope_evidence"] or "no_verified_origin_evidence",
                 "track_source_urls": list(dict.fromkeys(row["source_url"] for row in links)),
             })
         return output
