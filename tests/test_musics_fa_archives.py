@@ -1,6 +1,6 @@
 import unittest
 
-from app.parsers.musics_fa_archives import extract_artist_links, parse_artist_archive
+from app.parsers.musics_fa_archives import (\n    extract_artist_links,\n    extract_artist_links_from_track_page,\n    parse_artist_archive,\n)
 
 
 class MusicsFaArchiveParserTests(unittest.TestCase):
@@ -98,6 +98,41 @@ class MusicsFaArchiveParserTests(unittest.TestCase):
         self.assertEqual(artist["albums"][0]["artist_name"], "Hamid Hiraad")
         self.assertEqual(artist["albums"][0]["release_date"], "6 شهریور 1403")
         self.assertEqual(artist["tracks"], [])
+
+
+    def test_extracts_artist_links_only_from_song_article(self):
+        html = """
+        <html>
+          <body>
+            <nav><a href="/artists/navigation-link/">Navigation</a></nav>
+            <article class="mf_pst">
+              <a href="/artists/artist-one/">Artist One</a>
+              <a href="/artists/kurdish-songs/">کردی</a>
+              <a href="/category/pop/">Pop</a>
+            </article>
+            <footer><a href="/artists/footer-link/">Footer</a></footer>
+          </body>
+        </html>
+        """
+        artists = extract_artist_links_from_track_page(
+            html, "https://musics-fa.com/download-song/123/"
+        )
+        self.assertEqual(
+            artists,
+            [{
+                "name": "Artist One",
+                "source_url": "https://musics-fa.com/artists/artist-one/",
+            }],
+        )
+
+    def test_track_page_without_song_article_has_no_artist_links(self):
+        html = '<a href="/artists/navigation-link/">Navigation</a>'
+        self.assertEqual(
+            extract_artist_links_from_track_page(
+                html, "https://musics-fa.com/download-song/123/"
+            ),
+            [],
+        )
 
 
 if __name__ == "__main__":
