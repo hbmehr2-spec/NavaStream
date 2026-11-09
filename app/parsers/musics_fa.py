@@ -136,6 +136,41 @@ def _normalise_fa(value):
     return re.sub(r"\s+", " ", value).strip().lower()
 
 
+
+KNOWN_FOREIGN_ARTISTS = {
+    "bts",
+    "glass animals",
+    "bring me the horizon",
+    "empire of the sun",
+    "hugel",
+    "solto",
+    "flo rida",
+    "sia",
+    "imagine dragons",
+    "cansever",
+    "mustafa sandal",
+    "burak bulut",
+    "serdar ortac",
+    "ahmed kaya",
+}
+
+
+def classify_catalog_scope(artist):
+    """Only label exact, curated foreign-artist matches; never infer Iranian origin."""
+    normalized = _normalise_filename(artist or "")
+    if normalized in KNOWN_FOREIGN_ARTISTS:
+        return {
+            "catalog_scope": "foreign",
+            "scope_confidence": "high",
+            "scope_evidence": "curated_exact_foreign_artist_match",
+        }
+    return {
+        "catalog_scope": "uncertain",
+        "scope_confidence": "low",
+        "scope_evidence": "no_verified_origin_evidence",
+    }
+
+
 def _is_generic_artist(value):
     if not value:
         return True
@@ -321,6 +356,7 @@ def _extract_track_identity(article, audio_url):
             artist_source = "audio_filename_candidate"
             artist_confidence = "low"
 
+    scope = classify_catalog_scope(artist)
     classification = _classify_categories(article, title, audio_url, artist)
     classification_text = " ".join(
         (
@@ -340,6 +376,7 @@ def _extract_track_identity(article, audio_url):
             "validation_note": "Religious recitation/maddahi content is excluded from the music catalog.",
             "artist_source": artist_source,
             "artist_confidence": artist_confidence,
+            **scope,
             **classification,
         }
 
@@ -364,6 +401,7 @@ def _extract_track_identity(article, audio_url):
         "validation_note": validation_note,
         "artist_source": artist_source,
         "artist_confidence": artist_confidence,
+        **scope,
         **classification,
     }
 
@@ -394,6 +432,9 @@ def _metadata_fields(identity):
         "version_type": identity.get("version_type"),
         "artist_source": identity.get("artist_source"),
         "artist_confidence": identity.get("artist_confidence"),
+        "catalog_scope": identity.get("catalog_scope", "uncertain"),
+        "scope_confidence": identity.get("scope_confidence", "low"),
+        "scope_evidence": identity.get("scope_evidence", "no_verified_origin_evidence"),
     }
 
 
