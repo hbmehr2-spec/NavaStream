@@ -416,7 +416,7 @@ export default {
         });
       }
 
-      const artistMatch = path.match(/^\\/v1\\/artists\\/(\\d+)$/);
+      const artistMatch = path.match(/^\/v1\/artists\/(\d+)$/);
       if (artistMatch) {
         const artist = await env.DB.prepare(
           "SELECT id, name, source_url, description, artwork_url FROM catalog_artists WHERE id = ? LIMIT 1"
