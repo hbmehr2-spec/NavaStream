@@ -122,6 +122,7 @@ async def enrich_tracks_from_details(session, source_id, tracks):
             "genre_tags_json",
             "language_tags_json",
             "region_tags_json",
+            "trend_tags_json",
             "version_type",
             "artist_source",
             "artist_confidence",
@@ -217,6 +218,7 @@ async def save_tracks(source_id, tracks):
                 track.get("genre_tags_json", "[]"),
                 track.get("language_tags_json", "[]"),
                 track.get("region_tags_json", "[]"),
+                track.get("trend_tags_json", "[]"),
                 track.get("version_type"),
                 track.get("artist_source"),
                 track.get("artist_confidence"),
@@ -249,6 +251,7 @@ async def save_tracks(source_id, tracks):
                             genre_tags_json = ?,
                             language_tags_json = ?,
                             region_tags_json = ?,
+                            trend_tags_json = ?,
                             version_type = ?,
                             artist_source = ?,
                             artist_confidence = ?
@@ -266,10 +269,10 @@ async def save_tracks(source_id, tracks):
                         artwork_url, fingerprint, external_id, audio_url,
                         validation_status, validation_note,
                         source_categories_json, mood_tags_json, genre_tags_json,
-                        language_tags_json, region_tags_json, version_type,
-                        artist_source, artist_confidence, rights_status
+                        language_tags_json, region_tags_json, trend_tags_json,
+                        version_type, artist_source, artist_confidence, rights_status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown')
                     """,
                     values
                 )
