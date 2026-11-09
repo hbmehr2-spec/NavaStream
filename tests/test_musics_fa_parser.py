@@ -226,5 +226,26 @@ class MusicsFaParserTests(unittest.TestCase):
         self.assertEqual(result["scope_confidence"], "low")
         self.assertEqual(result["scope_evidence"], "no_verified_origin_evidence")
 
+
+    def test_uses_data_artist_and_cleans_fallback_heading(self):
+        html = """
+        <article class="mf_pst" data-id="129001" data-artist="وحید پورجمشید">
+          <header>
+            <h1>دانلود آهنگ جدید کجا گمت کردم | پخش آنلاین موزیکفا</h1>
+          </header>
+          <p>موزیکفا • پخش آنلاین آهنگ با کیفیت 320</p>
+          <span class="play" data-song="https://dls.musics-fa.com/Vahid%20Pourjamshid%20-%20Koja%20Gomet%20Kardam.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/129001/",
+        )
+
+        self.assertEqual(track["artist"], "وحید پورجمشید")
+        self.assertEqual(track["artist_source"], "detail_text")
+        self.assertEqual(track["title"], "کجا گمت کردم")
+
 if __name__ == "__main__":
     unittest.main()
