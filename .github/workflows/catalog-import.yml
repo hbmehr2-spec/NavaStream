@@ -54,7 +54,7 @@ jobs:
           PY
 
       - name: Import catalog into NavaStream server
-        run: python scripts/sync_catalog_to_cloudflare.py --limit "$NAVASTREAM_CRAWL_LIMIT"
+        run: PYTHONPATH=. python scripts/sync_catalog_to_cloudflare.py --limit "$NAVASTREAM_CRAWL_LIMIT"
 
       - name: Verify server catalog
         run: |
