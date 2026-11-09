@@ -545,6 +545,7 @@ export default {
 
       if (path === "/v1/tracks") {
         const query = (url.searchParams.get("q") || "").trim().slice(0, 120);
+        const scope = (url.searchParams.get("scope") || "").trim().toLowerCase();
         const limit = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "30", 10) || 30));
         const rawCursor = url.searchParams.get("cursor") || "0";
         const offset = Number.parseInt(rawCursor, 10);
@@ -552,17 +553,34 @@ export default {
         if (!Number.isSafeInteger(offset) || offset < 0) {
           return json({ error: "Invalid cursor." }, 400);
         }
-
-        let statement;
-        if (query) {
-          statement = env.DB.prepare(
-            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence, catalog_scope, scope_confidence, scope_evidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' AND (title LIKE ? OR artist LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?"
-          ).bind(`%${query}%`, `%${query}%`, limit + 1, offset);
-        } else {
-          statement = env.DB.prepare(
-            "SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds, published_at, source_categories_json, mood_tags_json, genre_tags_json, language_tags_json, region_tags_json, trend_tags_json, version_type, artist_source, artist_confidence, catalog_scope, scope_confidence, scope_evidence FROM catalog_tracks WHERE audio_url LIKE 'https://%' AND validation_status != 'excluded' ORDER BY id DESC LIMIT ? OFFSET ?"
-          ).bind(limit + 1, offset);
+        if (scope && !["iranian", "foreign", "uncertain"].includes(scope)) {
+          return json({ error: "Invalid scope filter." }, 400);
         }
+
+        const conditions = [
+          "audio_url LIKE 'https://%'",
+          "validation_status != 'excluded'",
+        ];
+        const bindings = [];
+        if (scope) {
+          conditions.push("catalog_scope = ?");
+          bindings.push(scope);
+        }
+        if (query) {
+          conditions.push("(title LIKE ? OR artist LIKE ?)");
+          bindings.push(`%${query}%`, `%${query}%`);
+        }
+        bindings.push(limit + 1, offset);
+        const statement = env.DB.prepare(
+          `SELECT id, title, artist, audio_url, artwork_url, NULL AS duration_seconds,
+                  published_at, source_categories_json, mood_tags_json, genre_tags_json,
+                  language_tags_json, region_tags_json, trend_tags_json, version_type,
+                  artist_source, artist_confidence, catalog_scope, scope_confidence,
+                  scope_evidence
+           FROM catalog_tracks
+           WHERE ${conditions.join(" AND ")}
+           ORDER BY id DESC LIMIT ? OFFSET ?`
+        ).bind(...bindings);
 
         const result = await statement.all();
         const rows = result.results || [];
