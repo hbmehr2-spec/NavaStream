@@ -300,6 +300,60 @@ export default {
       }
     }
 
+    if (path === "/internal/album-import") {
+      if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+      const expectedSecret = env.NAVASTREAM_INGEST_SECRET;
+      if (!expectedSecret || expectedSecret.length < 32) return json({ error: "Album import endpoint is not configured." }, 503);
+      const authorization = request.headers.get("authorization") || "";
+      const candidate = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+      if (!candidate || !(await equalSecret(candidate, expectedSecret))) return json({ error: "Unauthorized." }, 401);
+      let payload;
+      try {
+        const body = await request.text();
+        if (new TextEncoder().encode(body).length > 262144) return json({ error: "Payload too large." }, 413);
+        payload = JSON.parse(body);
+      } catch {
+        return json({ error: "Invalid JSON." }, 400);
+      }
+      if (!payload || !Array.isArray(payload.albums) || payload.albums.length < 1 || payload.albums.length > 50) {
+        return json({ error: "albums must contain between 1 and 50 items." }, 400);
+      }
+      const valid = payload.albums.every((album) =>
+        album && typeof album.name === "string" && album.name.trim().length > 0 &&
+        album.name.length <= 300 && validHttpsUrl(album.source_url) &&
+        (album.release_date == null || (typeof album.release_date === "string" && album.release_date.length <= 64)) &&
+        (album.artwork_url == null || validHttpsUrl(album.artwork_url, true)) &&
+        Array.isArray(album.artist_source_urls) && album.artist_source_urls.length <= 20 &&
+        album.artist_source_urls.every((value) => validHttpsUrl(value))
+      );
+      if (!valid) return json({ error: "One or more album records are invalid." }, 400);
+      try {
+        for (const album of payload.albums) {
+          await env.DB.prepare(
+            "INSERT INTO catalog_albums (name, source_url, release_date, artwork_url) VALUES (?, ?, ?, ?) ON CONFLICT(source_url) DO UPDATE SET name = excluded.name, release_date = COALESCE(excluded.release_date, catalog_albums.release_date), artwork_url = COALESCE(excluded.artwork_url, catalog_albums.artwork_url)"
+          ).bind(album.name.trim(), album.source_url, album.release_date || null, album.artwork_url || null).run();
+          const savedAlbum = await env.DB.prepare(
+            "SELECT id FROM catalog_albums WHERE source_url = ? LIMIT 1"
+          ).bind(album.source_url).first();
+          if (!savedAlbum) continue;
+          for (const artistUrl of [...new Set(album.artist_source_urls)]) {
+            const artist = await env.DB.prepare(
+              "SELECT id FROM catalog_artists WHERE source_url = ? LIMIT 1"
+            ).bind(artistUrl).first();
+            if (!artist) continue;
+            await env.DB.prepare(
+              "INSERT OR IGNORE INTO catalog_artist_albums (artist_id, album_id, source_url) VALUES (?, ?, ?)"
+            ).bind(artist.id, savedAlbum.id, album.source_url).run();
+          }
+        }
+        const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM catalog_albums").first();
+        return json({ ok: true, imported: payload.albums.length, albumsTotal: count?.total || 0 });
+      } catch (error) {
+        console.error("NavaStream album import failed:", error);
+        return json({ error: "Album import failed." }, 500);
+      }
+    }
+
     if (path === "/internal/import") {
       if (request.method !== "POST") {
         return json({ error: "Method not allowed." }, 405);
@@ -431,6 +485,44 @@ export default {
           id: String(artist.id), name: artist.name, sourceUrl: artist.source_url,
           description: artist.description, artworkUrl: artist.artwork_url,
           tracks: (tracks.results || []).map(trackPayload),
+        });
+      }
+
+      if (path === "/v1/albums") {
+        const query = (url.searchParams.get("q") || "").trim().slice(0, 120);
+        const limit = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "30", 10) || 30));
+        const offset = Math.max(0, Number.parseInt(url.searchParams.get("cursor") || "0", 10) || 0);
+        const statement = query
+          ? env.DB.prepare("SELECT a.id, a.name, a.source_url, a.release_date, a.artwork_url, COUNT(aa.artist_id) AS artist_count FROM catalog_albums a LEFT JOIN catalog_artist_albums aa ON aa.album_id = a.id WHERE a.name LIKE ? GROUP BY a.id ORDER BY a.id DESC LIMIT ? OFFSET ?").bind(`%${query}%`, limit + 1, offset)
+          : env.DB.prepare("SELECT a.id, a.name, a.source_url, a.release_date, a.artwork_url, COUNT(aa.artist_id) AS artist_count FROM catalog_albums a LEFT JOIN catalog_artist_albums aa ON aa.album_id = a.id GROUP BY a.id ORDER BY a.id DESC LIMIT ? OFFSET ?").bind(limit + 1, offset);
+        const result = await statement.all();
+        const rows = result.results || [];
+        const hasMore = rows.length > limit;
+        return json({
+          items: rows.slice(0, limit).map((row) => ({
+            id: String(row.id), name: row.name, sourceUrl: row.source_url,
+            releaseDate: row.release_date, artworkUrl: row.artwork_url,
+            artistCount: row.artist_count || 0,
+          })),
+          nextCursor: hasMore ? String(offset + limit) : null,
+        });
+      }
+
+      const albumMatch = path.match(/^\/v1\/albums\/(\d+)$/);
+      if (albumMatch) {
+        const album = await env.DB.prepare(
+          "SELECT id, name, source_url, release_date, artwork_url FROM catalog_albums WHERE id = ? LIMIT 1"
+        ).bind(Number(albumMatch[1])).first();
+        if (!album) return json({ error: "Album not found." }, 404);
+        const artists = await env.DB.prepare(
+          "SELECT a.id, a.name, a.source_url FROM catalog_artist_albums aa JOIN catalog_artists a ON a.id = aa.artist_id WHERE aa.album_id = ? ORDER BY a.name COLLATE NOCASE"
+        ).bind(album.id).all();
+        return json({
+          id: String(album.id), name: album.name, sourceUrl: album.source_url,
+          releaseDate: album.release_date, artworkUrl: album.artwork_url,
+          artists: artists.results || [],
+          tracks: [],
+          trackListStatus: "not_provided_by_source",
         });
       }
 
