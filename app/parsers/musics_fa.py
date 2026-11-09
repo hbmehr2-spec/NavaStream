@@ -22,6 +22,43 @@ ENGLISH_TRACK_RE = re.compile(
 )
 AUDIO_EXTENSIONS = (".mp3", ".m4a", ".flac", ".wav", ".aac", ".ogg")
 
+
+PAGE_NOISE_RE = re.compile(
+    r"موزیک\s*فا|music[- ]?fa|پخش\s+آنلاین|دانلود\s+(?:آهنگ|اهنگ)|"
+    r"آرشیو\s+آهنگ(?:\s+های)?|با\s+کیفیت|بهترین\s+کیفیت|"
+    r"تکست\s+و\s+ترجمه|متن\s+آهنگ",
+    re.IGNORECASE,
+)
+IDENTITY_CUTOFF_RE = re.compile(
+    r"\s*(?:به\s+همراه|همراه\s+با|با\s+کیفیت|پخش\s+آنلاین|"
+    r"دانلود\s+(?:آهنگ|اهنگ)|موزیک\s*فا|music[- ]?fa|"
+    r"آرشیو\s+آهنگ).*?$",
+    re.IGNORECASE,
+)
+
+
+def _clean_identity_field(value, max_length=160):
+    value = _clean(value)
+    if not value:
+        return None
+
+    value = re.sub(r"^دانلود\s*(?:آهنگ|اهنگ)\s*(?:جدید\s*)?", "", value, flags=re.IGNORECASE)
+    value = IDENTITY_CUTOFF_RE.sub("", value)
+    value = re.sub(r"\s+", " ", value).strip(" \t\r\n-–—|،,؛;:.!؟")
+    if not value or len(value) > max_length or PAGE_NOISE_RE.search(value):
+        return None
+    if re.fullmatch(r"(?:آهنگ|اهنگ|موزیک|دانلود|جدید|new music|download new music)", value, re.IGNORECASE):
+        return None
+    return value or None
+
+
+def _fallback_heading_title(heading):
+    value = _clean_identity_field(heading, max_length=180)
+    if not value:
+        return None
+    value = re.sub(r"^(?:آهنگ|اهنگ|موزیک)\s+", "", value, flags=re.IGNORECASE).strip()
+    return value or None
+
 MADDAHI_RE = re.compile(
     r"مداحی|مداح|نوحه(?:خوانی)?|روضه(?:خوانی)?|مرثیه(?:خوانی)?|سینه[\s‌_-]*زنی",
     re.IGNORECASE,
@@ -329,17 +366,19 @@ def _extract_track_identity(article, audio_url):
             break
 
     explicit_artist = (
-        _clean(persian_match.group("artist")) if persian_match else None
+        _clean_identity_field(persian_match.group("artist")) if persian_match else None
     )
-    title = _clean(persian_match.group("title")) if persian_match else None
-    english_artist = _clean(english_match.group("artist")) if english_match else None
-    english_title = _clean(english_match.group("title")) if english_match else None
+    title = _clean_identity_field(persian_match.group("title")) if persian_match else None
+    english_artist = _clean_identity_field(english_match.group("artist")) if english_match else None
+    english_title = _clean_identity_field(english_match.group("title")) if english_match else None
+    data_artist = _clean_identity_field(article.get("data-artist"), max_length=120)
 
     if not title:
         title = english_title
 
-    artist = explicit_artist or english_artist
-    artist_source = "detail_text" if explicit_artist else (
+    artist = data_artist or explicit_artist or english_artist
+    artist_source = (
+        "detail_text" if data_artist or explicit_artist else
         "english_metadata" if english_artist else None
     )
     artist_confidence = "high" if artist and not _is_generic_artist(artist) else None
@@ -462,12 +501,7 @@ def parse_track_detail(html, page_url):
     heading_tag = article.select_one("header h1, header h2, h1, h2")
     heading = _clean(heading_tag.get_text(" ", strip=True)) if heading_tag else None
     if not identity["title"]:
-        identity["title"] = re.sub(
-            r"^دانلود\s*(?:آهنگ|اهنگ)\s*",
-            "",
-            heading or "",
-            flags=re.IGNORECASE,
-        ) or heading
+        identity["title"] = _fallback_heading_title(heading)
 
     date_tag = article.select_one("header div span")
     release_date = _clean(date_tag.get_text(" ", strip=True)) if date_tag else None
@@ -517,12 +551,7 @@ def parse_tracks(html, page_url=BASE_URL):
         identity = _extract_track_identity(article, audio_url)
         heading = _clean(link.get_text(" ", strip=True))
         if not identity["title"]:
-            identity["title"] = re.sub(
-                r"^دانلود\s*(?:آهنگ|اهنگ)\s*",
-                "",
-                heading or "",
-                flags=re.IGNORECASE,
-            ) or heading
+            identity["title"] = _fallback_heading_title(heading)
 
         track = {
             "external_id": external_id,
