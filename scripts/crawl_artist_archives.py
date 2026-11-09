@@ -166,7 +166,7 @@ async def discover_artist_links_from_track_pages(session, limit):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            SELECT MIN(t.source_url)
+            SELECT MIN(t.source_url), TRIM(t.artist)
             FROM tracks AS t
             WHERE t.source_url IS NOT NULL
               AND TRIM(t.source_url) != ''
@@ -183,14 +183,18 @@ async def discover_artist_links_from_track_pages(session, limit):
             """,
             (limit,),
         )
-        track_urls = [row[0] for row in await cursor.fetchall() if row[0]]
+        track_rows = await cursor.fetchall()
 
     discovered = {}
-    for track_url in track_urls:
+    for track_url, expected_artist in track_rows:
+        if not track_url:
+            continue
         html = await fetch_page(session, track_url)
         if not html:
             continue
-        for artist in extract_artist_links_from_track_page(html, track_url):
+        for artist in extract_artist_links_from_track_page(
+            html, track_url, expected_artist=expected_artist
+        ):
             discovered.setdefault(artist["source_url"], artist)
 
     return list(discovered.values())
