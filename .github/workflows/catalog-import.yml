@@ -11,7 +11,7 @@ on:
       target_artists:
         description: Maximum number of artist archives to collect
         required: true
-        default: "250"
+        default: "100"
         type: string
 
 permissions:
