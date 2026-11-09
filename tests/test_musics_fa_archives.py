@@ -129,7 +129,29 @@ class MusicsFaArchiveParserTests(unittest.TestCase):
             }],
         )
 
-    def test_track_page_without_song_article_has_no_artist_links(self):
+    def test_extracts_archive_link_outside_song_article(self):
+        html = """
+        <html>
+          <body>
+            <nav><a href="/artists/navigation-link/">Navigation</a></nav>
+            <div class="entry-content">
+              <a href="/artists/novan/">آرشیو آهنگ های نوان</a>
+            </div>
+            <footer><a href="/artists/footer-link/">Footer</a></footer>
+          </body>
+        </html>
+        """
+        self.assertEqual(
+            extract_artist_links_from_track_page(
+                html, "https://musics-fa.com/download-song/123/"
+            ),
+            [{
+                "name": "نوان",
+                "source_url": "https://musics-fa.com/artists/novan/",
+            }],
+        )
+
+    def test_track_page_without_explicit_archive_link_has_no_artist_links(self):
         html = '<a href="/artists/navigation-link/">Navigation</a>'
         self.assertEqual(
             extract_artist_links_from_track_page(
