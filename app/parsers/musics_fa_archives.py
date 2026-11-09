@@ -76,7 +76,7 @@ def _parse_album_article(article, page_url, artist_name):
 
 def parse_artist_archive(html, page_url):
     """Extract artist identity, album cards, and song links from an artist archive."""
-    from app.parsers.musics_fa import parse_tracks
+    from app.parsers.musics_fa import classify_catalog_scope, parse_tracks
 
     soup = BeautifulSoup(html, "html.parser")
     heading = soup.select_one("main h1, article h1, h1")
@@ -133,6 +133,7 @@ def parse_artist_archive(html, page_url):
         "source_url": canonical_url,
         "description": description,
         "artwork_url": artwork_url,
+        **classify_catalog_scope(title),
         "tracks": tracks,
         "albums": albums,
         "next_pages": list(dict.fromkeys(next_pages)),
