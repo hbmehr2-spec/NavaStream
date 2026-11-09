@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from app.parsers.musics_fa import parse_track_detail, parse_tracks
@@ -101,14 +102,14 @@ class MusicsFaParserTests(unittest.TestCase):
         self.assertEqual(track["title"], "From Silence To Epic")
         self.assertEqual(track["validation_status"], "matched")
 
-    def test_extracts_artist_from_archive_text_without_false_audio_match(self):
+    def test_archive_breadcrumb_is_not_misidentified_as_artist(self):
         html = """
         <article class="mf_pst">
           <header><h1>دانلود آهنگ یکی نفسم بود گرفت نفسم ریمیکس</h1></header>
           <p>دانلود آهنگ یکی نفسم بود گرفت نفسم ریمیکس</p>
           <p>Download Old Music BY : Yeki Nafasem Bood With Text And 2 Quality 320 And 128 On Music-fa</p>
           <p>موزیکفا • رضا کرمی تارا • دانلود آهنگ یکی نفسم بود گرفت نفسم ریمیکس</p>
-          <p>پخش آنلاین آهنگ دانلود آهنگ با کیفیت 320 دانلود آهنگ با کیفیت 128 آرشیو آهنگ های رضا کرمی تارا کانال رسمی تلگرام موزیکفا</p>
+          <p>پخش آنلاین آهنگ دانلود آهنگ با کیفیت 320 آرشیو آهنگ های رضا کرمی تارا</p>
           <span class="play" data-song="https://dls.musics-fa.com/Unknown%20Artist%20-%20Yeki%20Nafasem%20Bood%20Remix.mp3"></span>
         </article>
         """
@@ -118,10 +119,66 @@ class MusicsFaParserTests(unittest.TestCase):
             "https://musics-fa.com/download-song/128468/",
         )
 
-        self.assertEqual(track["artist"], "رضا کرمی تارا")
-        self.assertEqual(track["title"], "یکی نفسم بود گرفت نفسم ریمیکس")
+        self.assertIsNone(track["artist"])
+        self.assertEqual(track["artist_source"], None)
         self.assertEqual(track["validation_status"], "needs_review")
-        self.assertIn("incomplete", track["validation_note"])
+
+    def test_ai_category_is_version_metadata_not_artist(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>تو اولین عشق تو آخرین عشق تویی لایق پرستش هوش مصنوعی</h1></header>
+          <a href="/category/ai/">هوش مصنوعی</a>
+          <span class="play" data-song="https://dls.musics-fa.com/Iliya%20-%20Avalin%20Eshgh%20To%20Akharin%20Eshgh.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/126593/",
+        )
+
+        self.assertEqual(track["artist"], "Iliya")
+        self.assertEqual(track["artist_source"], "audio_filename_candidate")
+        self.assertEqual(track["artist_confidence"], "low")
+        self.assertEqual(track["version_type"], "ai_generated")
+        self.assertEqual(json.loads(track["source_categories_json"]), ["هوش مصنوعی"])
+
+    def test_instagram_trend_is_separate_from_genre_and_artist(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>داره باورم میشه میمونی تا همیشه</h1></header>
+          <a href="/category/trend/">ترند اینستاگرام</a>
+          <span class="play" data-song="https://dls.musics-fa.com/Kamyar%20-%20Dare%20Bavaram%20Mishe.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/127745/",
+        )
+
+        self.assertEqual(track["artist"], "Kamyar")
+        self.assertEqual(json.loads(track["trend_tags_json"]), ["ترند اینستاگرام"])
+        self.assertNotIn("ترند شبکه‌های اجتماعی", json.loads(track["genre_tags_json"]))
+
+    def test_region_and_mood_categories_are_stored_separately(self):
+        html = """
+        <article class="mf_pst">
+          <header><h1>آهنگ شاد لری</h1></header>
+          <a href="/category/lori/">لری</a>
+          <a href="/category/happy/">شاد</a>
+          <span class="play" data-song="https://dls.musics-fa.com/Unknown%20Artist%20-%20Song.mp3"></span>
+        </article>
+        """
+
+        track = parse_track_detail(
+            html,
+            "https://musics-fa.com/download-song/127820/",
+        )
+
+        self.assertEqual(json.loads(track["region_tags_json"]), ["لری"])
+        self.assertEqual(json.loads(track["mood_tags_json"]), ["شاد"])
+        self.assertIsNone(track["artist"])
 
     def test_detail_page_keeps_uncertain_transliteration_for_review(self):
         html = """
