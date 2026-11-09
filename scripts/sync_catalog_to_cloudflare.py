@@ -25,6 +25,7 @@ TAXONOMY_FIELDS = (
     "genre_tags_json",
     "language_tags_json",
     "region_tags_json",
+    "trend_tags_json",
 )
 
 
@@ -49,7 +50,7 @@ def read_catalog_tracks(limit):
                 id, title, artist, audio_url, artwork_url,
                 source_url, external_id, release_date, validation_status,
                 source_categories_json, mood_tags_json, genre_tags_json,
-                language_tags_json, region_tags_json, version_type,
+                language_tags_json, region_tags_json, trend_tags_json, version_type,
                 artist_source, artist_confidence
             FROM tracks
             WHERE audio_url LIKE 'https://%'
@@ -75,6 +76,7 @@ def read_catalog_tracks(limit):
                 "genre_tags_json": row["genre_tags_json"] or "[]",
                 "language_tags_json": row["language_tags_json"] or "[]",
                 "region_tags_json": row["region_tags_json"] or "[]",
+                "trend_tags_json": row["trend_tags_json"] or "[]",
                 "version_type": row["version_type"],
                 "artist_source": row["artist_source"],
                 "artist_confidence": row["artist_confidence"],
