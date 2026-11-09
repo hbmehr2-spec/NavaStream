@@ -279,15 +279,17 @@ export default {
             "SELECT id FROM catalog_artists WHERE source_url = ? LIMIT 1"
           ).bind(artist.source_url).first();
           if (!saved) continue;
-          for (const trackUrl of [...new Set(artist.track_source_urls)]) {
-            const track = await env.DB.prepare(
-              "SELECT id FROM catalog_tracks WHERE source_url = ? LIMIT 1"
-            ).bind(trackUrl).first();
-            if (!track) continue;
-            await env.DB.prepare(
-              "INSERT OR IGNORE INTO catalog_track_artists (artist_id, track_id, source_url) VALUES (?, ?, ?)"
-            ).bind(saved.id, track.id, trackUrl).run();
-            linkedTracks += 1;
+          const uniqueUrls = [...new Set(artist.track_source_urls)];
+          for (let start = 0; start < uniqueUrls.length; start += 80) {
+            const chunk = uniqueUrls.slice(start, start + 80);
+            if (!chunk.length) continue;
+            const placeholders = chunk.map(() => "?").join(", ");
+            const result = await env.DB.prepare(
+              `INSERT OR IGNORE INTO catalog_track_artists (artist_id, track_id, source_url)
+               SELECT ?, id, source_url FROM catalog_tracks
+               WHERE source_url IN (${placeholders})`
+            ).bind(saved.id, ...chunk).run();
+            linkedTracks += result.meta?.changes || 0;
           }
         }
         const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM catalog_artists").first();
