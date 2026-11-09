@@ -78,6 +78,14 @@ async def init_db():
             "TEXT NOT NULL DEFAULT 'needs_review'"
         )
         await _ensure_column(db, "tracks", "validation_note", "TEXT")
+        await _ensure_column(db, "tracks", "source_categories_json", "TEXT")
+        await _ensure_column(db, "tracks", "mood_tags_json", "TEXT")
+        await _ensure_column(db, "tracks", "genre_tags_json", "TEXT")
+        await _ensure_column(db, "tracks", "language_tags_json", "TEXT")
+        await _ensure_column(db, "tracks", "region_tags_json", "TEXT")
+        await _ensure_column(db, "tracks", "version_type", "TEXT")
+        await _ensure_column(db, "tracks", "artist_source", "TEXT")
+        await _ensure_column(db, "tracks", "artist_confidence", "TEXT")
         await _ensure_column(db, "processing_queue", "telegram_message_id", "INTEGER")
         await _ensure_column(db, "processing_queue", "published_at", "TEXT")
 
